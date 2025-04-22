@@ -101,7 +101,7 @@ Sent after processing a request.
 
 ## **4. Error Handling**  
 - If `ResponseStatus != 0`, the sender should retry or abort.  
-- Timeout: If no response after **5 seconds**, consider the operation failed.  
+- Timeout: If no response after **5 seconds**, except for file transfers, consider the operation failed.  
 
 ---
 
