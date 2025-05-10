@@ -11,8 +11,8 @@ import os
 BIND_ADDR   = os.getenv("LCP_BIND_ADDR", "0.0.0.0")
 
 # Puertos UDP/TCP: se pueden sobreescribir con LCP_UDP_PORT y LCP_TCP_PORT
-UDP_PORT    = int(os.getenv("LCP_UDP_PORT", "9990"))
-TCP_PORT    = int(os.getenv("LCP_TCP_PORT", "9990"))
+UDP_PORT    = int(os.getenv("LCP_UDP_PORT", "15000"))
+TCP_PORT    = int(os.getenv("LCP_TCP_PORT", "15000"))
 
 # Tamaños de campos en bytes
 USERID_SIZE  = 20
