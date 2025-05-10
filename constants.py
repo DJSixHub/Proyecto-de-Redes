@@ -2,7 +2,7 @@
 import os
 
 # Forzar bind solo a loopback en Windows para evitar errores de permisos
-BIND_ADDR   = os.getenv("LCP_BIND_ADDR", "127.0.0.1")
+BIND_ADDR   = os.getenv("LCP_BIND_ADDR", "0.0.0.0")
 
 # Puertos UDP/TCP: se pueden sobreescribir con LCP_UDP_PORT y LCP_TCP_PORT
 UDP_PORT    = int(os.getenv("LCP_UDP_PORT", "15000"))
