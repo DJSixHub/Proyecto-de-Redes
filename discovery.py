@@ -4,6 +4,7 @@ import threading
 import time
 
 from constants import UDP_PORT, TIMEOUT_SECONDS
+from constants import BIND_ADDR, UDP_PORT
 from packet import encode_header, decode_header
 from neighbor_table import NeighborTable
 
@@ -16,7 +17,8 @@ class Discovery:
         # Socket UDP para broadcast y recepción
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.sock.bind(("", UDP_PORT))
+        self.sock.bind((BIND_ADDR, UDP_PORT))
+
 
         # Hilo de escucha
         self.listen_thread = threading.Thread(target=self._listen_loop, daemon=True)

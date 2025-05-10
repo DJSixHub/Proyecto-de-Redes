@@ -5,6 +5,7 @@ import os
 from constants import UDP_PORT, TCP_PORT
 from packet import encode_header, decode_header
 from neighbor_table import NeighborTable
+from constants import BIND_ADDR, UDP_PORT
 
 
 class FileTransfer:
@@ -16,12 +17,12 @@ class FileTransfer:
         # Socket UDP para negociación
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.udp_sock.bind(('', UDP_PORT))
+        self.sock.bind((BIND_ADDR, UDP_PORT))
 
         # Socket TCP para transferencia de datos
         self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.tcp_sock.bind(('', TCP_PORT))
+        self.tcp_sock.bind( (BIND_ADDR, TCP_PORT) )
         self.tcp_sock.listen(5)
 
         

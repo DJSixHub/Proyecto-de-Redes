@@ -6,6 +6,7 @@ import struct
 from constants import UDP_PORT, HEADER_SIZE, BODYLEN_SIZE
 from packet import encode_header, decode_header
 from neighbor_table import NeighborTable
+from constants import BIND_ADDR, UDP_PORT
 
 
 
@@ -26,7 +27,7 @@ class Messaging:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # Permitir  listeners
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(("", UDP_PORT))
+        self.sock.bind((BIND_ADDR, UDP_PORT))
 
        
         threading.Thread(target=self._listener, daemon=True).start()
