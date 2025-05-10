@@ -1,6 +1,8 @@
+import os
+
 # Puertos
-UDP_PORT    = 9990
-TCP_PORT    = 9990
+UDP_PORT = int(os.getenv("LCP_UDP_PORT", "9990"))
+TCP_PORT = int(os.getenv("LCP_TCP_PORT", "9990"))
 
 # Tamaños de campos en bytes
 USERID_SIZE     = 20
