@@ -2,6 +2,7 @@ import socket
 import threading
 import queue
 import struct
+import errno
 
 from constants import BIND_ADDR, UDP_PORT, HEADER_SIZE, BODYLEN_SIZE
 from packet import encode_header, decode_header
@@ -20,8 +21,11 @@ class Messaging:
 
         try:
             self.sock.bind((BIND_ADDR, UDP_PORT))
-        except PermissionError:
-            new_port = self._bind_in_range(self.sock, BIND_ADDR, 10000, 11000)
+        except OSError as e:
+            if e.errno in (errno.EACCES, errno.EADDRINUSE):
+                self._bind_in_range(self.sock, BIND_ADDR, 10000, 11000)
+            else:
+                raise
 
         threading.Thread(target=self._listener, daemon=True).start()
         threading.Thread(target=self._processor, daemon=True).start()
@@ -36,7 +40,7 @@ class Messaging:
             body_length=len(body)
         )
         packet = header + struct.pack("!Q", 0) + body
-        self.sock.sendto(packet, ('<broadcast>', UDP_PORT))
+        self.sock.sendto(packet, ("<broadcast>", UDP_PORT))
 
     def _listener(self):
         while True:
@@ -44,15 +48,12 @@ class Messaging:
                 data, addr = self.sock.recvfrom(4096)
             except OSError:
                 continue
-
             try:
                 hdr = decode_header(data[:HEADER_SIZE])
             except ValueError:
                 continue
-
             if hdr["opcode"] != 1 or hdr["user_id_from"] == self.self_id:
                 continue
-
             blen = hdr["body_length"]
             offset = HEADER_SIZE + BODYLEN_SIZE
             text = data[offset: offset + blen].decode("utf-8", errors="ignore")
@@ -71,6 +72,9 @@ class Messaging:
             try:
                 sock.bind((addr, p))
                 return p
-            except PermissionError:
-                continue
+            except OSError as e:
+                if e.errno in (errno.EACCES, errno.EADDRINUSE):
+                    continue
+                else:
+                    raise
         raise RuntimeError(f"No se pudo bindear en ningún puerto de {start_port}-{end_port}")
