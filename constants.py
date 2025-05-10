@@ -1,14 +1,8 @@
-# constants.py
-"""
-Configuración del protocolo LCP.
-Los puertos y la dirección de bind pueden provenir de variables de entorno,
-para facilitar pruebas locales con múltiples instancias.
-"""
 
 import os
 
-
-BIND_ADDR   = os.getenv("LCP_BIND_ADDR", "0.0.0.0")
+# Forzar bind solo a loopback en Windows para evitar errores de permisos
+BIND_ADDR   = os.getenv("LCP_BIND_ADDR", "127.0.0.1")
 
 # Puertos UDP/TCP: se pueden sobreescribir con LCP_UDP_PORT y LCP_TCP_PORT
 UDP_PORT    = int(os.getenv("LCP_UDP_PORT", "15000"))
@@ -35,4 +29,4 @@ RESP_ERROR = 2
 TIMEOUT_SECONDS = 5
 
 # ID special para broadcast 
-BROADCAST_ID = b'\\xFF' * USERID_SIZE
+BROADCAST_ID = b'\xFF' * USERID_SIZE
