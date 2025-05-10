@@ -2,7 +2,7 @@ import socket
 import threading
 import os
 
-from constants import BIND_ADDR, UDP_PORT, TCP_PORT, HEADER_SIZE
+from constants import BIND_ADDR, UDP_PORT, TCP_PORT, HEADER_SIZE, BODYLEN_SIZE
 from packet import encode_header, decode_header
 from neighbor_table import NeighborTable
 
@@ -18,14 +18,14 @@ class FileTransfer:
         self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         try:
             self.udp_sock.bind((BIND_ADDR, UDP_PORT))
-        except PermissionError:
+        except OSError:
             self._bind_in_range(self.udp_sock, BIND_ADDR, 10000, 11000)
 
         self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             self.tcp_sock.bind((BIND_ADDR, TCP_PORT))
-        except PermissionError:
+        except OSError:
             self._bind_in_range(self.tcp_sock, BIND_ADDR, 11000, 12000)
         self.tcp_sock.listen(5)
 
@@ -43,8 +43,7 @@ class FileTransfer:
             body_id=0,
             body_length=len(meta)
         )
-        packet = header + meta
-        self.udp_sock.sendto(packet, ('<broadcast>', UDP_PORT))
+        self.udp_sock.sendto(header + meta, ('<broadcast>', UDP_PORT))
         def serve():
             while True:
                 conn, _ = self.tcp_sock.accept()
@@ -110,6 +109,6 @@ class FileTransfer:
             try:
                 sock.bind((addr, p))
                 return p
-            except PermissionError:
+            except OSError:
                 continue
         raise RuntimeError(f"No se pudo bindear en ningún puerto de {start_port}-{end_port}")
