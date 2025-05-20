@@ -1,33 +1,33 @@
 import socket
 import threading
 import time
-import ipaddress
 from util import get_local_ip
 from protocol import pack_header, unpack_header, pack_response
 
-LCP_PORT = 9990
-BROADCAST_UID = '\xff' * 20
+LCP_PORT           = 9990
+BROADCAST_UID      = '\xff' * 20
 BROADCAST_INTERVAL = 5.0  # segundos
 
 class Discovery:
     def __init__(self, user_id: str, timeout: float = 2.0):
-        # calcula broadcast de tu subred /24
+        # calcula broadcast de la subred /24
         local_ip = get_local_ip()
-        net = ipaddress.ip_network(f"{local_ip}/24", strict=False)
-        self.broadcast_ip = str(net.broadcast_address)
+        octs = local_ip.split('.')
+        self.broadcast_ip = '.'.join(octs[:3] + ['255'])
         self.user_id = user_id
         self.timeout = timeout
         self.peers = {}
-        # socket UDP para recibir y responder ecos
+        # socket UDP para recibir ecos y enviar broadcasts
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.sock.bind(('', LCP_PORT))
         self.sock.settimeout(1.0)
         threading.Thread(target=self._listen_loop, daemon=True).start()
         threading.Thread(target=self._broadcast_loop, daemon=True).start()
 
     def _listen_loop(self):
-        # recibe ecos y actualiza peers
+        # recibe paquetes y responde ecos
         while True:
             try:
                 data, addr = self.sock.recvfrom(1024)
@@ -43,18 +43,19 @@ class Discovery:
                     pass
 
     def _broadcast_loop(self):
-        # envía broadcast periódico
+        # envía broadcast periódico usando el mismo socket
+        pkt = pack_header(self.user_id, BROADCAST_UID, 0)
         while True:
             try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                pkt = pack_header(self.user_id, BROADCAST_UID, 0)
-                s.sendto(pkt, (self.broadcast_ip, LCP_PORT))
-                s.close()
+                self.sock.sendto(pkt, (self.broadcast_ip, LCP_PORT))
             except:
                 pass
             time.sleep(BROADCAST_INTERVAL)
 
     def discover(self) -> dict[str, str]:
-        # devuelve el dict actual de peers
+        # devuelve el estado actual de peers
         return self.peers
+
+    def stop(self):
+        # cierra el socket de escucha
+        self.sock.close()
