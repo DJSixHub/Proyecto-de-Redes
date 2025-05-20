@@ -6,9 +6,12 @@ from util import get_local_ip_and_broadcast
 from discovery import Discovery
 from messaging import Messaging
 
-SETTINGS_FILE = Path('settings.json')
-HISTORY_FILE = Path('chat_history.json')
-DOWNLOADS_DIR = Path('Descargas')
+# Directorios
+CONFIG_DIR = Path("config")
+CONFIG_DIR.mkdir(exist_ok=True)
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
+HISTORY_FILE = CONFIG_DIR / "chat_history.json"
+DOWNLOADS_DIR = Path("Descargas")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
 def load_json(p, default):

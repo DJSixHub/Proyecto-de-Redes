@@ -2,7 +2,7 @@ import socket
 import psutil
 
 def get_local_ip_and_broadcast():
-   
+    """Retorna una IP local válida y su broadcast, calculado desde la máscara de red."""
     for iface, addrs in psutil.net_if_addrs().items():
         stats = psutil.net_if_stats().get(iface)
         if not stats or not stats.isup:

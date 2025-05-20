@@ -1,6 +1,21 @@
 from util import get_local_ip
 from discovery import Discovery
 from messaging import Messaging
+from pathlib import Path
+import json
+
+CONFIG_DIR = Path("config")
+CONFIG_DIR.mkdir(exist_ok=True)
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
+
+# Guardar o cargar nickname
+def load_nickname():
+    if SETTINGS_FILE.exists():
+        return json.loads(SETTINGS_FILE.read_text()).get("nickname")
+    return None
+
+def save_nickname(nick):
+    SETTINGS_FILE.write_text(json.dumps({"nickname": nick}))
 
 # Callback al recibir un mensaje de texto
 def on_msg(from_id, message):
@@ -11,7 +26,17 @@ def on_file(from_id, filepath):
     print(f"\n📁 [{from_id}] envió archivo: {filepath}")
 
 if __name__ == '__main__':
-    user = input("Tu UserID (máx. 20 caracteres): ")[:20]
+    saved_nick = load_nickname()
+    if saved_nick:
+        user = input(f"Tu UserID (ENTER para usar '{saved_nick}'): ").strip()
+        if not user:
+            user = saved_nick
+    else:
+        user = input("Tu UserID (máx. 20 caracteres): ").strip()
+
+    user = user[:20]
+    save_nickname(user)
+
     ip = get_local_ip()
     print(f"🖥️  Tu IP local es: {ip}")
 
