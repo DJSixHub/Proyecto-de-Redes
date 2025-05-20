@@ -107,7 +107,10 @@ else:
 st.title("📡 Chat en LAN")
 
 mac = st.session_state.selected_mac
-if mac:
+
+if not mac or mac not in st.session_state.peers:
+    st.info("Selecciona un peer válido para chatear.")
+else:
     peer_nick = st.session_state.peers[mac]['nick']
     st.subheader(f"💬 Conversación con `{peer_nick}`")
 
