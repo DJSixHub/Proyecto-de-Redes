@@ -20,13 +20,13 @@ def load_json(p, default):
 def save_json(p, data):
     p.write_text(json.dumps(data))
 
-def on_msg(sender, msg):
-    st.session_state.history.setdefault(sender, []).append(('peer', msg))
+def on_msg(sender_mac, msg):
+    st.session_state.history.setdefault(sender_mac, []).append(('peer', msg))
     save_json(HISTORY_FILE, st.session_state.history)
 
-def on_file(sender, filepath):
+def on_file(sender_mac, filepath):
     name = os.path.basename(filepath)
-    st.session_state.history.setdefault(sender, []).append(('file', name))
+    st.session_state.history.setdefault(sender_mac, []).append(('file', name))
     save_json(HISTORY_FILE, st.session_state.history)
 
 # === Inicialización de estado ===
@@ -59,62 +59,76 @@ if not st.session_state.nickname:
 
 # === Inicializar componentes principales ===
 if 'initialized' not in st.session_state:
-    user = st.session_state.nickname
+    user_nick = st.session_state.nickname
     ip, _ = get_local_ip_and_broadcast()
-    disc = Discovery(user)
-    msg = Messaging(user, on_message=on_msg, on_file=on_file, udp_sock=disc.sock)
+    disc = Discovery(user_nick)
+    msg = Messaging(user_nick, on_message=on_msg, on_file=on_file, udp_sock=disc.sock)
 
     st.session_state.discovery = disc
     st.session_state.messaging = msg
     st.session_state.peers = disc.peers
     st.session_state.history = history
-    st.session_state.selected_uid = None
+    st.session_state.selected_mac = None
     st.session_state.initialized = True
 
 st.sidebar.markdown("---")
 
-# === Botón para buscar peers ===
+# === Buscar vecinos ===
 if st.sidebar.button("🔍 Buscar Peers"):
     peers = st.session_state.discovery.search_peers()
     st.session_state.peers = peers
     st.session_state.messaging.update_peers(peers)
     st.sidebar.success(f"{len(peers)} peer(s) encontrados.")
-    for uid, ip in peers.items():
-        st.sidebar.markdown(f"- `{uid}` en `{ip}`")
+    for mac, data in peers.items():
+        st.sidebar.markdown(f"- `{data['nick']}` en `{data['ip']}`")
+
+# === Listar peers sin incluir a sí mismo ===
+peer_dict = {
+    mac: data['nick']
+    for mac, data in st.session_state.peers.items()
+    if mac != st.session_state.discovery.mac_addr
+}
 
 # === Selector de peer ===
-peer_ids = list(st.session_state.peers.keys())
-if peer_ids:
+if peer_dict:
     st.sidebar.subheader("🧑 Chat con:")
-    st.session_state.selected_uid = st.sidebar.selectbox("Selecciona un peer", peer_ids)
+    nick_list = [f"{data}" for data in peer_dict.values()]
+    selected_nick = st.sidebar.selectbox("Selecciona un peer", nick_list)
+
+    # Buscar MAC asociado
+    for mac, nick in peer_dict.items():
+        if nick == selected_nick:
+            st.session_state.selected_mac = mac
+            break
 else:
     st.sidebar.info("Aún no se han detectado vecinos.")
 
 # === Pantalla Principal ===
 st.title("📡 Chat en LAN")
 
-if peer_ids and st.session_state.selected_uid:
-    uid = st.session_state.selected_uid
-    st.subheader(f"💬 Conversación con `{uid}`")
+mac = st.session_state.selected_mac
+if mac:
+    peer_nick = st.session_state.peers[mac]['nick']
+    st.subheader(f"💬 Conversación con `{peer_nick}`")
 
     # Historial
-    chat = st.session_state.history.get(uid, [])[-10:]
+    chat = st.session_state.history.get(mac, [])[-10:]
     for tipo, contenido in chat:
         if tipo == 'peer':
-            with st.chat_message(uid, avatar="👤"):
+            with st.chat_message(peer_nick, avatar="👤"):
                 st.markdown(contenido)
         elif tipo == 'yo':
-            with st.chat_message("Tú", is_user=True):
+            with st.chat_message("Tú"):
                 st.markdown(contenido)
         elif tipo == 'file':
-            with st.chat_message(uid, avatar="📁"):
-                st.markdown(f"Archivo recibido: `{contenido}`")
+            with st.chat_message(peer_nick, avatar="📁"):
+                st.markdown(f"📎 Archivo recibido: `{contenido}`")
 
     # Input de mensaje
-    msg = st.chat_input(f"Mensaje para {uid}")
+    msg = st.chat_input(f"Mensaje para {peer_nick}")
     if msg:
-        st.session_state.messaging.send_message(uid, msg)
-        st.session_state.history.setdefault(uid, []).append(('yo', msg))
+        st.session_state.messaging.send_message(mac, msg)
+        st.session_state.history.setdefault(mac, []).append(('yo', msg))
         save_json(HISTORY_FILE, st.session_state.history)
         st.rerun()
 
@@ -124,19 +138,20 @@ if peer_ids and st.session_state.selected_uid:
         path = DOWNLOADS_DIR / uploaded.name
         with open(path, "wb") as f:
             f.write(uploaded.read())
-        st.session_state.messaging.send_file(uid, str(path))
-        st.session_state.history.setdefault(uid, []).append(('yo', f"[archivo: {uploaded.name}]"))
+        st.session_state.messaging.send_file(mac, str(path))
+        st.session_state.history.setdefault(mac, []).append(('yo', f"[archivo: {uploaded.name}]"))
         save_json(HISTORY_FILE, st.session_state.history)
-        st.success(f"Archivo enviado a {uid}")
+        st.success(f"Archivo enviado a {peer_nick}")
         st.rerun()
 
 # === Mensaje grupal ===
 st.divider()
 st.subheader("📢 Enviar a todos los vecinos")
+
 msg_group = st.text_input("Mensaje grupal", key="group_input")
 if st.button("Enviar a todos"):
-    for peer in peer_ids:
-        st.session_state.messaging.send_message(peer, msg_group)
-        st.session_state.history.setdefault(peer, []).append(('yo', f"[broadcast] {msg_group}"))
+    for mac in peer_dict:
+        st.session_state.messaging.send_message(mac, msg_group)
+        st.session_state.history.setdefault(mac, []).append(('yo', f"[broadcast] {msg_group}"))
     save_json(HISTORY_FILE, st.session_state.history)
     st.success("Mensaje enviado a todos.")
