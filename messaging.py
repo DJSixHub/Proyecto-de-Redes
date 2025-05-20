@@ -13,7 +13,7 @@ class Messaging:
         self.user_id = user_id
         self.on_message = on_message
         self.on_file = on_file
-        self._peer_map = {}  # nickname -> IP
+        self._peer_map = {}
 
         if udp_sock:
             self.udp_sock = udp_sock
@@ -49,61 +49,51 @@ class Messaging:
                 if header['op_code'] != 2:
                     continue
 
-                total_len = header['body_len']
-                payload = data[HEADER_SIZE:]
-
-                if len(payload) < total_len:
-                    continue
-
-                sender_nick = header['user_from']
-                text = payload[:total_len].decode(errors='ignore')
-
-                self.on_message(sender_nick, text)
+                body = data[HEADER_SIZE:HEADER_SIZE + header['body_len']]
+                text = body.decode(errors='ignore')
+                self.on_message(header['user_from'], text)
 
             except Exception as e:
                 print(f"[Messaging] Error UDP: {e}")
 
+    def send_message(self, nickname: str, text: str):
+        try:
+            ip = self._get_peer_ip(nickname)
+            msg_bytes = text.encode()
+            hdr = pack_header(self.user_id, nickname, 2, 0, len(msg_bytes))
+            self.udp_sock.sendto(hdr + msg_bytes, (ip, LCP_PORT))
+        except Exception as e:
+            print(f"[Messaging] Error enviando mensaje a {nickname}: {e}")
+
     def _serve_tcp(self):
         while True:
             try:
-                conn, addr = self.tcp_sock.accept()
+                conn, _ = self.tcp_sock.accept()
                 threading.Thread(target=self._handle_tcp, args=(conn,), daemon=True).start()
-            except Exception:
-                continue
+            except Exception as e:
+                print(f"[Messaging] Error TCP: {e}")
 
     def _handle_tcp(self, conn):
         try:
             header = conn.recv(HEADER_SIZE)
             if len(header) < HEADER_SIZE:
                 return
-            hdr = unpack_header(header)
 
-            sender_nick = hdr['user_from']
+            hdr = unpack_header(header)
             filename = hdr['user_to']
+            sender = hdr['user_from']
 
             path = Path("Descargas") / filename
             with open(path, "wb") as f:
-                while True:
-                    chunk = conn.recv(1024)
-                    if not chunk:
-                        break
+                while chunk := conn.recv(1024):
                     f.write(chunk)
 
-            self.on_file(sender_nick, str(path))
+            self.on_file(sender, str(path))
 
         except Exception as e:
-            print(f"[Messaging] Error archivo: {e}")
+            print(f"[Messaging] Error recibiendo archivo: {e}")
         finally:
             conn.close()
-
-    def send_message(self, nickname: str, msg: str):
-        try:
-            ip = self._get_peer_ip(nickname)
-            hdr = pack_header(self.user_id, nickname, 2, 0, len(msg.encode()))
-            packet = hdr + msg.encode()
-            self.udp_sock.sendto(packet, (ip, LCP_PORT))
-        except Exception as e:
-            print(f"[Messaging] Error mensaje a {nickname}: {e}")
 
     def send_file(self, nickname: str, filepath: str):
         try:
@@ -118,5 +108,6 @@ class Messaging:
                 while chunk := f.read(1024):
                     sock.sendall(chunk)
             sock.close()
+
         except Exception as e:
-            print(f"[Messaging] Error archivo a {nickname}: {e}")
+            print(f"[Messaging] Error enviando archivo a {nickname}: {e}")
