@@ -1,62 +1,56 @@
 import socket
 import threading
 import time
+from util import get_local_ip_and_broadcast
 from protocol import (
-    pack_header, unpack_response,
-    HEADER_SIZE, RESPONSE_SIZE, BROADCAST_UID,
-    pack_response
+    pack_header, unpack_header,
+    pack_response, unpack_response,
+    HEADER_SIZE, RESPONSE_SIZE, BROADCAST_UID
 )
 
 LCP_PORT = 9990
-DISCOVERY_RETRIES = 2
-BROADCAST_INTERVAL = 10  # seconds
+BROADCAST_INTERVAL = 5.0
+DISCOVERY_RETRIES = 3
 
 class Discovery:
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str, timeout: float = 2.0):
         self.user_id = user_id
+        self.timeout = timeout
+        self.peers = {}
+
+        local_ip, broadcast_ip = get_local_ip_and_broadcast()
+        self.local_ip = local_ip
+        self.broadcast_ip = broadcast_ip
+
+        print(f"[Discovery] IP local: {local_ip}, broadcast: {broadcast_ip}, usuario: {user_id}")
+
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.sock.bind(('', LCP_PORT))
         self.sock.settimeout(1.0)
 
-        self.broadcast_ip = self._find_broadcast()
-        self.peers = {}
-
-        threading.Thread(target=self._listener_loop, daemon=True).start()
+        threading.Thread(target=self._listen_loop, daemon=True).start()
         threading.Thread(target=self._broadcast_loop, daemon=True).start()
 
-    def _find_broadcast(self) -> str:
-        from util import get_local_ip_and_broadcast
-        _, broadcast = get_local_ip_and_broadcast()
-        return broadcast
-
-    def _listener_loop(self):
+    def _listen_loop(self):
         while True:
             try:
                 data, addr = self.sock.recvfrom(1024)
-
                 if len(data) == HEADER_SIZE:
-                    header = self._parse_echo_header(data)
-                    if header:
-                        sender = header["user_from"]
-                        target = header["user_to"]
-                        op = header["op_code"]
-
-                        if target == BROADCAST_UID.decode('latin1') and op == 0:
-                            print(f"[Discovery] Echo recibido de {sender} @ {addr[0]}")
-                            response = pack_response(0, self.user_id)
-                            self.sock.sendto(response, addr)
-                    continue
+                    if data[20:40] != BROADCAST_UID:
+                        continue
+                    header = unpack_header(data)
+                    if header['op_code'] != 0 or header['user_from'] == self.user_id:
+                        continue
+                    sender = header['user_from']
+                    self.peers[sender] = addr[0]
+                    self.sock.sendto(pack_response(0, self.user_id), addr)
 
                 elif len(data) == RESPONSE_SIZE:
                     status, responder = unpack_response(data)
-                    if status == 0 and responder != self.user_id:
+                    if responder != self.user_id and status == 0:
                         self.peers[responder] = addr[0]
-                        print(f"[Discovery] Echo-Reply de {responder} @ {addr[0]}")
-
-                else:
-                    print(f"[Discovery] Paquete ignorado, tamaño inesperado: {len(data)}")
 
             except socket.timeout:
                 continue
@@ -64,50 +58,36 @@ class Discovery:
                 print(f"[Discovery] Error en listener: {e}")
 
     def _broadcast_loop(self):
-        pkt = pack_header(self.user_id, BROADCAST_UID.decode('latin1'), 0)
+        pkt = pack_header(self.user_id, BROADCAST_UID, 0)
         while True:
             try:
-                print("[Discovery] Enviando broadcast Echo...")
                 self.sock.sendto(pkt, (self.broadcast_ip, LCP_PORT))
             except Exception as e:
-                print(f"[Discovery] Error al enviar broadcast: {e}")
+                print(f"[Discovery] Error en broadcast: {e}")
             time.sleep(BROADCAST_INTERVAL)
 
-    def search_peers(self, duration=2.0) -> dict:
-        """Descubrimiento puntual (por botón). Devuelve {user_id: ip}"""
-        pkt = pack_header(self.user_id, BROADCAST_UID.decode('latin1'), 0)
-        end_time = time.time() + duration
-
-        found = {}
+    def search_peers(self, duration=2.0):
+        pkt = pack_header(self.user_id, BROADCAST_UID, 0)
+        end = time.time() + duration
 
         for _ in range(DISCOVERY_RETRIES):
             try:
-                print("[Discovery] → Broadcast puntual de descubrimiento")
                 self.sock.sendto(pkt, (self.broadcast_ip, LCP_PORT))
             except Exception as e:
-                print(f"[Discovery] Error en broadcast puntual: {e}")
+                print(f"[Discovery] Error al enviar broadcast: {e}")
             time.sleep(0.5)
 
-        while time.time() < end_time:
+        recv_end = time.time() + 1
+        while time.time() < recv_end:
             try:
                 data, addr = self.sock.recvfrom(1024)
                 if len(data) == RESPONSE_SIZE:
                     status, responder = unpack_response(data)
-                    if status == 0 and responder != self.user_id:
-                        found[responder] = addr[0]
-                        print(f"[Discovery] ← Respuesta puntual de {responder}")
+                    if responder != self.user_id and status == 0:
+                        self.peers[responder] = addr[0]
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"[Discovery] Error recibiendo respuesta: {e}")
+                print(f"[Discovery] Error buscando peers: {e}")
 
-        return found
-
-    def _parse_echo_header(self, data: bytes):
-        from protocol import unpack_header
-        try:
-            header = unpack_header(data)
-            return header
-        except Exception as e:
-            print(f"[Discovery] Header inválido: {e}")
-            return None
+        return self.peers

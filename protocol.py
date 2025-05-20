@@ -15,8 +15,10 @@ def pack_header(user_from: str, user_to: str | bytes, op_code: int,
 
     if isinstance(user_to, str):
         ut = user_to.encode('utf-8')[:20].ljust(20, b'\x00')
-    else:
+    elif isinstance(user_to, bytes):
         ut = user_to[:20].ljust(20, b'\x00')
+    else:
+        raise ValueError("user_to debe ser str o bytes")
 
     return struct.pack(HEADER_FMT, uf, ut, op_code, body_id, body_len, b'\x00' * 50)
 
