@@ -37,20 +37,15 @@ class Discovery:
             try:
                 data, addr = self.sock.recvfrom(1024)
                 if len(data) != HEADER_SIZE:
-                    print(f"[!] Paquete de tamaño inesperado ({len(data)} bytes) ignorado.")
-                    print(f"    HEX: {data[:min(len(data), 32)].hex()}")
                     continue
 
                 header = unpack_header(data)
-
                 peer = header['user_from']
                 if peer == self.user_id:
-                    continue  # no incluirse a sí mismo
+                    continue
 
                 self.peers[peer] = addr[0]
                 print(f"[Discovery] Peer detectado: {peer} en {addr[0]}")
-
-                # Enviar respuesta
                 self.sock.sendto(pack_response(0, self.user_id), addr)
 
             except Exception as e:
@@ -66,11 +61,20 @@ class Discovery:
             time.sleep(BROADCAST_INTERVAL)
 
     def search_peers(self, duration=2.0):
-        self.peers.clear()
         pkt = pack_header(self.user_id, '', 0)
-        self.sock.sendto(pkt, (self.broadcast_ip, LCP_PORT))
-        start = time.time()
-        while time.time() - start < duration:
+        end = time.time() + duration
+
+        # Fase 1: múltiples broadcasts
+        while time.time() < end:
+            try:
+                self.sock.sendto(pkt, (self.broadcast_ip, LCP_PORT))
+            except Exception as e:
+                print(f"[Discovery] Error al enviar broadcast: {e}")
+            time.sleep(0.5)
+
+        # Fase 2: recepción extendida
+        recv_end = time.time() + 1
+        while time.time() < recv_end:
             try:
                 data, addr = self.sock.recvfrom(1024)
                 if len(data) != RESPONSE_SIZE:
@@ -82,4 +86,5 @@ class Discovery:
                 continue
             except Exception as e:
                 print(f"[Discovery] Error buscando peers: {e}")
+
         return self.peers
