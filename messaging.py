@@ -21,9 +21,12 @@ class Messaging:
         self._pending_messages = {}  # body_id → metadata
         self._seen_messages = {}  # (user_from, body_id) → timestamp
 
-        self.udp_sock = udp_sock or socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.udp_sock.bind(('', LCP_PORT))
+        if udp_sock:
+            self.udp_sock = udp_sock  # ← Socket ya creado por Discovery
+        else:
+            self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.udp_sock.bind(('', LCP_PORT))
 
         self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -47,14 +50,12 @@ class Messaging:
             try:
                 data, addr = self.udp_sock.recvfrom(HEADER_SIZE + 4096)
 
-                # === Fase 1: header
                 if len(data) == HEADER_SIZE:
                     header = unpack_header(data)
                     op = header["op_code"]
                     body_id = header["body_id"]
                     sender = header["user_from"]
 
-                    # Validación de spoofing
                     expected_ip = self._peer_map.get(sender)
                     if expected_ip and addr[0] != expected_ip:
                         print(f"[⚠️] Spoofing detectado: {sender} desde {addr[0]} ≠ {expected_ip}")
@@ -68,7 +69,6 @@ class Messaging:
                     self.udp_sock.sendto(pack_response(0, self.user_id), addr)
                     continue
 
-                # === Fase 2: cuerpo
                 if len(data) > 8:
                     body_id = int.from_bytes(data[:8], byteorder="big")
                     payload = data[8:]
@@ -76,8 +76,6 @@ class Messaging:
 
                     if entry:
                         sender = entry["from"]
-
-                        # Verificar duplicado
                         key = (sender, body_id)
                         if key in self._seen_messages:
                             print(f"[⛔] Mensaje duplicado ignorado de {sender} (body_id={body_id})")
@@ -150,7 +148,6 @@ class Messaging:
             body_id = int.from_bytes(body_id_bytes, byteorder="big")
             bytes_to_read = hdr["body_len"] - 8
 
-            # Validación de duplicado
             key = (sender, body_id)
             if key in self._seen_messages:
                 print(f"[⛔] Archivo duplicado ignorado de {sender} (body_id={body_id})")
