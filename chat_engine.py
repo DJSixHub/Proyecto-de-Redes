@@ -77,16 +77,20 @@ def run_chat_engine():
     msg = Messaging(USER_ID, on_message=on_message, on_file=on_file, udp_sock=disc.sock)
 
     def discovery_loop():
+        print("[DEBUG] discovery_loop corriendo...")
         while True:
-            do_scan = True
+            do_scan = False
+
             if SCAN_FILE.exists():
+                print("[DEBUG] SCAN_FILE detectado")
                 try:
                     trigger = json.loads(SCAN_FILE.read_text())
+                    print(f"[DEBUG] Contenido de SCAN_FILE: {trigger}")
                     if trigger.get("scan") is True:
                         do_scan = True
                         SCAN_FILE.unlink()
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[ERROR] leyendo SCAN_FILE: {e}")
 
             if do_scan:
                 peers = disc.search_peers()
@@ -95,6 +99,7 @@ def run_chat_engine():
                 timestamp = time.time()
                 extended_peers = {}
                 nick_map = load_json(NICKMAP_FILE, {})
+
                 for uid, ip in peers.items():
                     extended_peers[uid] = {"ip": ip, "last_seen": timestamp}
                     if uid not in nick_map:
@@ -105,7 +110,7 @@ def run_chat_engine():
                 msg.update_peers({uid: data["ip"] for uid, data in extended_peers.items()})
                 print(f"[DEBUG] peers actualizados desde discovery: {extended_peers}")
 
-                # Recuperación de historial
+                # Recuperación de historial si es nuevo
                 previous_peers = load_json(PEERS_FILE, {})
                 new_peers = [uid for uid in peers if uid not in previous_peers]
                 for new_uid in new_peers:
@@ -113,7 +118,6 @@ def run_chat_engine():
                     msg.send_message(new_uid, "#HISTORY_REQUEST")
 
             time.sleep(10)
-
 
     def outbox_loop():
         while True:
@@ -138,8 +142,6 @@ def run_chat_engine():
 
             for uid, info in list(peers.items()):
                 ip = info.get("ip")
-                last_seen = info.get("last_seen", 0)
-
                 pkt = pack_header(USER_ID, uid, 0)
                 try:
                     disc.sock.sendto(pkt, (ip, 9990))
@@ -152,7 +154,6 @@ def run_chat_engine():
                 except:
                     pass
 
-                # No respuesta → eliminar
                 print(f"[HEARTBEAT] {uid} no respondió. Eliminando de lista.")
                 del peers[uid]
                 changed = True
