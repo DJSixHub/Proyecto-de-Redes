@@ -13,7 +13,7 @@ class Messaging:
         self.user_id = user_id
         self.on_message = on_message
         self.on_file = on_file
-        self._peer_map = {}
+        self._peer_map = {}  # nickname -> IP
 
         if udp_sock:
             self.udp_sock = udp_sock
@@ -46,7 +46,7 @@ class Messaging:
                     continue
 
                 header = unpack_header(data)
-                if header['op_code'] != 2:
+                if header['op_code'] != 1:
                     continue
 
                 body = data[HEADER_SIZE:HEADER_SIZE + header['body_len']]
@@ -60,7 +60,7 @@ class Messaging:
         try:
             ip = self._get_peer_ip(nickname)
             msg_bytes = text.encode()
-            hdr = pack_header(self.user_id, nickname, 2, 0, len(msg_bytes))
+            hdr = pack_header(self.user_id, nickname, 1, 0, len(msg_bytes))  # op_code = 1
             self.udp_sock.sendto(hdr + msg_bytes, (ip, LCP_PORT))
         except Exception as e:
             print(f"[Messaging] Error enviando mensaje a {nickname}: {e}")
@@ -80,6 +80,9 @@ class Messaging:
                 return
 
             hdr = unpack_header(header)
+            if hdr['op_code'] != 2:
+                return
+
             filename = hdr['user_to']
             sender = hdr['user_from']
 
@@ -102,7 +105,7 @@ class Messaging:
             sock.connect((ip, LCP_PORT))
 
             filename = Path(filepath).name
-            hdr = pack_header(self.user_id, filename, 3)
+            hdr = pack_header(self.user_id, filename, 2)  # op_code = 2
             sock.sendall(hdr)
             with open(filepath, "rb") as f:
                 while chunk := f.read(1024):

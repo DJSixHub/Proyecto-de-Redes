@@ -5,11 +5,12 @@ from util import get_local_ip_and_broadcast
 from protocol import (
     pack_header, unpack_header,
     pack_response, unpack_response,
-    HEADER_SIZE, RESPONSE_SIZE
+    HEADER_SIZE, RESPONSE_SIZE, BROADCAST_UID
 )
 
 LCP_PORT = 9990
-BROADCAST_INTERVAL = 5.0  # segundos
+BROADCAST_INTERVAL = 5.0  # para emisión continua
+DISCOVERY_RETRIES = 3     # veces que se reenvía en búsqueda
 
 class Discovery:
     def __init__(self, user_id: str, timeout: float = 2.0):
@@ -36,23 +37,37 @@ class Discovery:
         while True:
             try:
                 data, addr = self.sock.recvfrom(1024)
-                if len(data) != HEADER_SIZE:
-                    continue
 
-                header = unpack_header(data)
-                peer = header['user_from']
-                if peer == self.user_id:
-                    continue
+                if len(data) == HEADER_SIZE:
+                    header = unpack_header(data)
 
-                self.peers[peer] = addr[0]
-                print(f"[Discovery] Peer detectado: {peer} en {addr[0]}")
-                self.sock.sendto(pack_response(0, self.user_id), addr)
+                    if header['op_code'] != 0:
+                        continue
 
+                    sender = header['user_from']
+                    if sender == self.user_id:
+                        continue
+
+                    # Agregar o actualizar peer
+                    self.peers[sender] = addr[0]
+                    print(f"[Discovery] Detectado: {sender} en {addr[0]}")
+
+                    # Responder con paquete tipo Response
+                    resp = pack_response(0, self.user_id)
+                    self.sock.sendto(resp, addr)
+
+                elif len(data) == RESPONSE_SIZE:
+                    status, responder = unpack_response(data)
+                    if responder != self.user_id:
+                        self.peers[responder] = addr[0]
+
+            except socket.timeout:
+                continue
             except Exception as e:
                 print(f"[Discovery] Error en listener: {e}")
 
     def _broadcast_loop(self):
-        pkt = pack_header(self.user_id, '', 0)
+        pkt = pack_header(self.user_id, BROADCAST_UID.decode('latin1'), 0)
         while True:
             try:
                 self.sock.sendto(pkt, (self.broadcast_ip, LCP_PORT))
@@ -61,27 +76,25 @@ class Discovery:
             time.sleep(BROADCAST_INTERVAL)
 
     def search_peers(self, duration=2.0):
-        pkt = pack_header(self.user_id, '', 0)
+        pkt = pack_header(self.user_id, BROADCAST_UID.decode('latin1'), 0)
         end = time.time() + duration
 
-        # Fase 1: múltiples broadcasts
-        while time.time() < end:
+        # Enviar múltiples paquetes
+        for _ in range(DISCOVERY_RETRIES):
             try:
                 self.sock.sendto(pkt, (self.broadcast_ip, LCP_PORT))
             except Exception as e:
                 print(f"[Discovery] Error al enviar broadcast: {e}")
             time.sleep(0.5)
 
-        # Fase 2: recepción extendida
-        recv_end = time.time() + 1
-        while time.time() < recv_end:
+        # Escuchar respuestas durante el resto del tiempo
+        while time.time() < end:
             try:
                 data, addr = self.sock.recvfrom(1024)
-                if len(data) != RESPONSE_SIZE:
-                    continue
-                status, responder = unpack_response(data)
-                if responder != self.user_id:
-                    self.peers[responder] = addr[0]
+                if len(data) == RESPONSE_SIZE:
+                    status, responder = unpack_response(data)
+                    if responder != self.user_id:
+                        self.peers[responder] = addr[0]
             except socket.timeout:
                 continue
             except Exception as e:

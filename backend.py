@@ -1,34 +1,44 @@
-# backend.py
 from util import get_local_ip
 from discovery import Discovery
 from messaging import Messaging
 
 # Callback al recibir un mensaje de texto
 def on_msg(from_id, message):
-    print(f"[{from_id}] dice: {message}")
+    print(f"\n📨 [{from_id}] dice: {message}")
 
 # Callback al recibir un archivo
-def on_file(from_id, data):
-    print(f"Recibido archivo ({len(data)} bytes).")
+def on_file(from_id, filepath):
+    print(f"\n📁 [{from_id}] envió archivo: {filepath}")
 
 if __name__ == '__main__':
-    user = input("Tu UserID (max 20 chars): ")
-    ip   = get_local_ip()
-    print(f"Tu IP local: {ip}")
+    user = input("Tu UserID (máx. 20 caracteres): ")[:20]
+    ip = get_local_ip()
+    print(f"🖥️  Tu IP local es: {ip}")
 
-    disc  = Discovery(user)
-    disc.start_listener()
-    peers = disc.discover()          # dict {user_id: ip}
-    print("Vecinos encontrados:", peers)
+    # Descubrimiento de vecinos
+    disc = Discovery(user)
+    print("🔍 Buscando vecinos...")
+    peers = disc.search_peers()
+    print("✅ Vecinos encontrados:")
+    for uid, ip in peers.items():
+        print(f" - {uid} en {ip}")
 
-    msg   = Messaging(user, on_message=on_msg, on_file=on_file)
+    # Iniciar mensajería
+    msg = Messaging(user, on_message=on_msg, on_file=on_file)
+    msg.update_peers(peers)
 
     while True:
-        entrada = input("Enviar a (UserID o lista separada por comas): ")
-        texto   = input("Mensaje: ")
-        ids     = [u.strip() for u in entrada.split(',') if u.strip()]
-        grupo   = {u: peers[u] for u in ids if u in peers}
-        if not grupo:
-            print("No hay destinatarios válidos. Revisa los UserIDs.")
+        entrada = input("\nEnviar a (nickname o varios separados por coma): ").strip()
+        if not entrada:
             continue
-        msg.send_group_message(grupo, texto)
+        texto = input("Mensaje: ").strip()
+        if not texto:
+            continue
+
+        ids = [u.strip() for u in entrada.split(',') if u.strip()]
+        for uid in ids:
+            if uid in peers:
+                msg.send_message(uid, texto)
+                print(f"✅ Enviado a {uid}")
+            else:
+                print(f"⚠️  {uid} no está en la lista de vecinos.")
