@@ -6,7 +6,7 @@ from protocol import pack_header, unpack_header, pack_response, unpack_response
 
 LCP_PORT           = 9990
 BROADCAST_UID      = '\xff' * 20
-BROADCAST_INTERVAL = 5.0  # segundos
+BROADCAST_INTERVAL = 5.0
 
 class Discovery:
     def __init__(self, user_id: str, timeout: float = 2.0):

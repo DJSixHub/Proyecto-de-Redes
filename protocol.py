@@ -1,7 +1,5 @@
-# protocol.py
 import struct
 
-# Formatos fijos
 _HEADER_FMT    = '!20s20sB B Q 50s'
 HEADER_SIZE    = struct.calcsize(_HEADER_FMT)
 _RESPONSE_FMT  = '!B20s4s'
