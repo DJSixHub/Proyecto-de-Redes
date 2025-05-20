@@ -1,25 +1,23 @@
 import struct
 
-# Constants
-HEADER_FMT = '!20s20sB B Q 50s'
-HEADER_SIZE = struct.calcsize(HEADER_FMT)  # 100 bytes
+# Estructura: 20s user_from, 20s user_to, B op_code, I body_id, Q body_len, 50s padding
+HEADER_FMT = '!20s20sB I Q 50s'
+HEADER_SIZE = struct.calcsize(HEADER_FMT)
 
 RESPONSE_FMT = '!B20s4s'
-RESPONSE_SIZE = struct.calcsize(RESPONSE_FMT)  # 25 bytes
+RESPONSE_SIZE = struct.calcsize(RESPONSE_FMT)
 
 BROADCAST_UID = b'\xFF' * 20
 
 def pack_header(user_from: str, user_to: str | bytes, op_code: int,
                 body_id: int = 0, body_len: int = 0) -> bytes:
     uf = user_from.encode('utf-8')[:20].ljust(20, b'\x00')
-
     if isinstance(user_to, str):
         ut = user_to.encode('utf-8')[:20].ljust(20, b'\x00')
     elif isinstance(user_to, bytes):
         ut = user_to[:20].ljust(20, b'\x00')
     else:
         raise ValueError("user_to debe ser str o bytes")
-
     return struct.pack(HEADER_FMT, uf, ut, op_code, body_id, body_len, b'\x00' * 50)
 
 def unpack_header(data: bytes) -> dict:

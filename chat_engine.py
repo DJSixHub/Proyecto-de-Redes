@@ -57,7 +57,6 @@ def on_message(sender, message):
             print(f"[MSG] Error al parsear historial: {e}")
         return
 
-    # Mensaje normal
     history.setdefault(sender, []).append(("peer", message))
     save_json(HISTORY_FILE, history)
     print(f"[MSG] {sender}: {message}")
@@ -80,7 +79,6 @@ def run_chat_engine():
         print("[DEBUG] discovery_loop corriendo...")
         while True:
             do_scan = False
-
             if SCAN_FILE.exists():
                 print("[DEBUG] SCAN_FILE detectado")
                 try:
@@ -99,7 +97,6 @@ def run_chat_engine():
                 timestamp = time.time()
                 extended_peers = {}
                 nick_map = load_json(NICKMAP_FILE, {})
-
                 for uid, ip in peers.items():
                     extended_peers[uid] = {"ip": ip, "last_seen": timestamp}
                     if uid not in nick_map:
@@ -110,7 +107,6 @@ def run_chat_engine():
                 msg.update_peers({uid: data["ip"] for uid, data in extended_peers.items()})
                 print(f"[DEBUG] peers actualizados desde discovery: {extended_peers}")
 
-                # Recuperación de historial si es nuevo
                 previous_peers = load_json(PEERS_FILE, {})
                 new_peers = [uid for uid in peers if uid not in previous_peers]
                 for new_uid in new_peers:
@@ -143,20 +139,25 @@ def run_chat_engine():
             for uid, info in list(peers.items()):
                 ip = info.get("ip")
                 pkt = pack_header(USER_ID, uid, 0)
-                try:
-                    disc.sock.sendto(pkt, (ip, 9990))
-                    disc.sock.settimeout(1.0)
-                    response, _ = disc.sock.recvfrom(RESPONSE_SIZE)
-                    status, responder = unpack_response(response)
-                    if status == 0 and responder == uid:
-                        peers[uid]["last_seen"] = current_time
-                        continue
-                except:
-                    pass
 
-                print(f"[HEARTBEAT] {uid} no respondió. Eliminando de lista.")
-                del peers[uid]
-                changed = True
+                responded = False
+                for attempt in range(2):
+                    try:
+                        disc.sock.sendto(pkt, (ip, 9990))
+                        disc.sock.settimeout(1.5)
+                        response, _ = disc.sock.recvfrom(RESPONSE_SIZE)
+                        status, responder = unpack_response(response)
+                        if status == 0 and responder == uid:
+                            peers[uid]["last_seen"] = current_time
+                            responded = True
+                            break
+                    except:
+                        continue
+
+                if not responded:
+                    print(f"[HEARTBEAT] {uid} no respondió tras 2 intentos. Eliminando.")
+                    del peers[uid]
+                    changed = True
 
             if changed:
                 save_json(PEERS_FILE, peers)
