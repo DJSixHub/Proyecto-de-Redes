@@ -48,16 +48,13 @@ history = load_json(HISTORY_FILE, {})
 peers_raw = load_json(PEERS_FILE, {})
 nick_map = load_json(NICKMAP_FILE, {})
 
-now = time.time()
-peers = {
-    uid: data["ip"]
-    for uid, data in peers_raw.items()
-    if now - data["last_seen"] < 30
-}
+# === DEBUG sin filtro por last_seen ===
+peers = {uid: data["ip"] for uid, data in peers_raw.items()}
 
-# === UI Sidebar ===
+# === BARRA LATERAL ===
 st.sidebar.title(f"👤 {st.session_state.nickname}")
 
+# Cambiar nickname
 if not st.session_state.editing_nick:
     if st.sidebar.button("✏️ Cambiar nombre de usuario"):
         st.session_state.editing_nick = True
@@ -69,11 +66,12 @@ else:
         st.session_state.editing_nick = False
         st.rerun()
 
+# Buscar peers manualmente
 if st.sidebar.button("🔍 Buscar Peers"):
     save_json(SCAN_FILE, {"scan": True})
     st.sidebar.success("Solicitud enviada para buscar vecinos.")
 
-# Mostrar peers
+# Mostrar peers conectados
 st.sidebar.markdown("### 🧑‍🤝‍🧑 Peers activos")
 if peers:
     for uid, ip in peers.items():
@@ -84,6 +82,11 @@ if peers:
     st.session_state.selected_peer = peer_selected
 else:
     st.sidebar.warning("No hay peers conectados.")
+
+# === DEBUG PANEL ===
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🐞 DEBUG: peers_raw")
+st.sidebar.json(peers_raw)
 
 # === UI Principal ===
 st.title("📡 Chat Local LCP")
@@ -111,7 +114,7 @@ if peer:
         save_json(HISTORY_FILE, history)
         st.rerun()
 
-# === Difusión grupal ===
+# === Difusión grupal simulada ===
 if peers:
     st.divider()
     st.subheader("📢 Enviar mensaje a todos")

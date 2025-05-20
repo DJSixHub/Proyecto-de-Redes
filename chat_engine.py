@@ -90,30 +90,30 @@ def run_chat_engine():
 
             if do_scan:
                 peers = disc.search_peers()
+                print(f"[DEBUG] Vecinos detectados por discovery: {peers}")
+
                 timestamp = time.time()
-
-                # === Detectar nuevos peers
-                previous_peers = load_json(PEERS_FILE, {})
-                new_peers = [uid for uid in peers if uid not in previous_peers]
-
                 extended_peers = {}
                 nick_map = load_json(NICKMAP_FILE, {})
-
                 for uid, ip in peers.items():
                     extended_peers[uid] = {"ip": ip, "last_seen": timestamp}
                     if uid not in nick_map:
-                        nick_map[uid] = uid  # valor por defecto si no hay nick
+                        nick_map[uid] = uid
 
                 save_json(PEERS_FILE, extended_peers)
                 save_json(NICKMAP_FILE, nick_map)
                 msg.update_peers({uid: data["ip"] for uid, data in extended_peers.items()})
-                print(f"[ENGINE] Vecinos actualizados: {list(extended_peers.keys())}")
+                print(f"[DEBUG] peers actualizados desde discovery: {extended_peers}")
 
+                # Recuperación de historial
+                previous_peers = load_json(PEERS_FILE, {})
+                new_peers = [uid for uid in peers if uid not in previous_peers]
                 for new_uid in new_peers:
                     print(f"[ENGINE] Solicitando historial a {new_uid}")
                     msg.send_message(new_uid, "#HISTORY_REQUEST")
 
             time.sleep(10)
+
 
     def outbox_loop():
         while True:
