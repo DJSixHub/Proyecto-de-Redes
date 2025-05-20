@@ -6,7 +6,7 @@ from util import get_local_ip_and_broadcast
 from discovery import Discovery
 from messaging import Messaging
 
-# Directorios
+# === Rutas y carpetas ===
 CONFIG_DIR = Path("config")
 CONFIG_DIR.mkdir(exist_ok=True)
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
@@ -14,15 +14,22 @@ HISTORY_FILE = CONFIG_DIR / "chat_history.json"
 DOWNLOADS_DIR = Path("Descargas")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
-def load_json(p, default):
-    if p.exists():
+# === Utilidades JSON ===
+def load_json(p: Path, default: dict):
+    try:
+        if not p.exists() or p.stat().st_size == 0:
+            p.write_text(json.dumps(default))
+            return default
         return json.loads(p.read_text())
-    p.write_text(json.dumps(default))
-    return default
+    except json.JSONDecodeError:
+        print(f"⚠️ Archivo corrupto: {p.name}, reescribiendo con valor por defecto.")
+        p.write_text(json.dumps(default))
+        return default
 
 def save_json(p, data):
     p.write_text(json.dumps(data))
 
+# === Callbacks de mensajes ===
 def on_msg(sender_nick, msg):
     st.session_state.history.setdefault(sender_nick, []).append(('peer', msg))
     save_json(HISTORY_FILE, st.session_state.history)
@@ -41,6 +48,7 @@ if 'nickname' not in st.session_state:
     st.session_state.editing_nick = False
     st.session_state.new_nick = settings['nickname'] or ''
 
+# === Panel lateral ===
 st.sidebar.title("🔧 Configuración")
 st.sidebar.markdown(f"**Tu nickname:** `{st.session_state.nickname or '—'}`")
 
@@ -60,7 +68,7 @@ if not st.session_state.nickname:
     st.sidebar.warning("⚠️ Define tu nickname para continuar.")
     st.stop()
 
-# === Inicializar componentes ===
+# === Inicialización única ===
 if 'initialized' not in st.session_state:
     user = st.session_state.nickname
     ip, _ = get_local_ip_and_broadcast()
@@ -76,7 +84,7 @@ if 'initialized' not in st.session_state:
 
 st.sidebar.markdown("---")
 
-# === Buscar vecinos manualmente ===
+# === Búsqueda manual de vecinos ===
 if st.sidebar.button("🔍 Buscar Peers"):
     peers = st.session_state.discovery.search_peers()
     st.session_state.peers = peers
@@ -85,7 +93,7 @@ if st.sidebar.button("🔍 Buscar Peers"):
     for nick, ip in peers.items():
         st.sidebar.markdown(f"- `{nick}` en `{ip}`")
 
-# === Listar peers (excluye a sí mismo)
+# === Lista de peers disponibles ===
 peer_list = [nick for nick in st.session_state.peers if nick != st.session_state.nickname]
 
 if peer_list:
