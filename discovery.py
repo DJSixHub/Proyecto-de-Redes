@@ -1,4 +1,3 @@
-# discovery.py
 import socket
 import threading
 import time
@@ -13,31 +12,30 @@ class Discovery:
     def __init__(self, user_id: str, timeout: float = 2.0):
         self.user_id = user_id
         self.timeout = timeout
-        # Socket para recibir respuestas, enlazado a la IP local
+        # Socket para recibir respuestas, ligado a todas las interfaces
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # no bind a '' aquí para evitar conflicto al enviar broadcast
-        local_ip = get_local_ip()
-        self.sock.bind((local_ip, LCP_PORT))
+        self.sock.bind(('', LCP_PORT))
 
     def start_listener(self):
         threading.Thread(target=self._listen_responses, daemon=True).start()
 
     def _listen_responses(self):
         while True:
-            data, addr = self.sock.recvfrom(1024)
+            try:
+                data, addr = self.sock.recvfrom(1024)
+            except OSError:
+                continue
             hdr = unpack_header(data)
             if hdr['op_code'] == 0 and hdr['user_to'] == BROADCAST_UID:
+                # responde al originador del echo
                 self.sock.sendto(pack_response(0, self.user_id), addr)
 
     def discover(self) -> dict[str, str]:
-        # Socket temporal para enviar broadcast sin bind conflictivo
+        # Socket efímero para enviar el broadcast
         send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         send_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        # No bind, o bind a ('', 0) para puerto efímero
         send_sock.bind(('', 0))
-
-        # Envío de Echo broadcast
         pkt = pack_header(self.user_id, BROADCAST_UID, 0)
         send_sock.sendto(pkt, (BROADCAST_IP, LCP_PORT))
         send_sock.close()
