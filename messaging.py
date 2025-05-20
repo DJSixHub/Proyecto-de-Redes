@@ -1,5 +1,6 @@
 import socket
 import threading
+from pathlib import Path
 from protocol import (
     pack_header, unpack_header,
     pack_response, unpack_response,
@@ -14,7 +15,7 @@ class Messaging:
         self.on_message = on_message
         self.on_file    = on_file
 
-        # Socket UDP para recibir mensajes (opcionalmente reutilizado)
+        # Socket UDP para recibir mensajes (puede venir de Discovery)
         if udp_sock:
             self.udp_sock = udp_sock
         else:
@@ -26,7 +27,7 @@ class Messaging:
                 print(f"[Messaging] Error bind UDP (¿firewall?): {e}")
                 raise
 
-        # Socket TCP para archivos
+        # Socket TCP para transferencia de archivos
         try:
             self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -36,24 +37,26 @@ class Messaging:
             print(f"[Messaging] Error bind TCP (¿firewall?): {e}")
             raise
 
+        # Inicia hilos de servicio
         threading.Thread(target=self._serve_udp, daemon=True).start()
         threading.Thread(target=self._serve_tcp, daemon=True).start()
 
+    # Atiende mensajes UDP entrantes y dispara callback on_message
     def _serve_udp(self):
         while True:
             try:
                 data, addr = self.udp_sock.recvfrom(HEADER_SIZE + 1024)
-            except Exception as e:
-                # ignora timeouts y otros errores menores
-                continue
-
+            except Exception:
+                continue  # ignora timeouts u otros errores
             hdr = unpack_header(data)
             if hdr['op_code'] == 1:
+                # Responde al handshake
                 try:
                     self.udp_sock.sendto(pack_response(0, self.user_id), addr)
                 except Exception as e:
                     print(f"[Messaging] Error respondiendo handshake UDP: {e}")
                     continue
+                # Recibe el cuerpo
                 try:
                     body, _ = self.udp_sock.recvfrom(hdr['body_len'] + 8)
                 except Exception:
@@ -61,6 +64,7 @@ class Messaging:
                 msg = body[8:].decode('utf-8', errors='ignore')
                 self.on_message(hdr['user_from'], msg)
 
+    # Envía un mensaje de texto en dos fases usando un socket temporal
     def send_message(self, target_ip: str, target_id: str, text: str):
         body = text.encode()
         hdr  = pack_header(self.user_id, target_id, 1, 1, len(body))
@@ -75,6 +79,7 @@ class Messaging:
         except Exception as e:
             print(f"[Messaging] Error enviando mensaje a {target_id}@{target_ip}: {e}")
 
+    # Atiende conexiones TCP entrantes para archivos y dispara callback on_file
     def _serve_tcp(self):
         while True:
             conn, _ = self.tcp_sock.accept()
@@ -88,6 +93,7 @@ class Messaging:
                 print(f"[Messaging] Error respondiendo TCP: {e}")
             self.on_file(None, content)
 
+    # Envía un archivo en handshake UDP + payload TCP
     def send_file(self, target_ip: str, target_id: str, filepath: str):
         try:
             data = Path(filepath).read_bytes()
@@ -95,9 +101,9 @@ class Messaging:
             send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             send_sock.sendto(hdr, (target_ip, LCP_PORT))
             status, _ = unpack_response(send_sock.recv(RESPONSE_SIZE))
+            send_sock.close()
             if status != 0:
                 raise RuntimeError("Handshake de archivo fallido")
-            send_sock.close()
 
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.connect((target_ip, LCP_PORT))
@@ -109,6 +115,7 @@ class Messaging:
         except Exception as e:
             print(f"[Messaging] Error enviando archivo a {target_id}@{target_ip}: {e}")
 
+    # Envía un mensaje a múltiples destinatarios con sufijo de grupo
     def send_group_message(self, targets: dict[str, str], text: str):
         sufijo = f" (también se le envió a: {', '.join(targets.keys())})"
         full   = text + sufijo
