@@ -63,7 +63,7 @@ if __name__ == '__main__':
         ids = [u.strip() for u in entrada.split(',') if u.strip()]
         for uid in ids:
             if uid in peers:
+                print(f"⏳ Enviando mensaje a {uid}...")
                 msg.send_message(uid, texto)
-                print(f"✅ Enviado a {uid}")
             else:
-                print(f"⚠️  {uid} no está en la lista de vecinos.")
+                print(f"⚠️  {uid} no está en la lista de vecinos")

@@ -1,9 +1,11 @@
 import socket
 import threading
+import random
 from pathlib import Path
 from protocol import (
     pack_header, unpack_header,
-    HEADER_SIZE
+    pack_response, unpack_response,
+    HEADER_SIZE, RESPONSE_SIZE
 )
 
 LCP_PORT = 9990
@@ -13,7 +15,7 @@ class Messaging:
         self.user_id = user_id
         self.on_message = on_message
         self.on_file = on_file
-        self._peer_map = {}  # nickname -> IP
+        self._peer_map = {}
 
         if udp_sock:
             self.udp_sock = udp_sock
@@ -42,28 +44,56 @@ class Messaging:
         while True:
             try:
                 data, addr = self.udp_sock.recvfrom(HEADER_SIZE + 4096)
-                if len(data) < HEADER_SIZE:
-                    continue
+                if len(data) == HEADER_SIZE:
+                    header = unpack_header(data)
+                    if header['op_code'] == 1:
+                        # Paso 1: Confirmar recepción del header
+                        response = pack_response(0, self.user_id)
+                        self.udp_sock.sendto(response, addr)
+                        continue
 
-                header = unpack_header(data)
-                if header['op_code'] != 1:
-                    continue
-
-                body = data[HEADER_SIZE:HEADER_SIZE + header['body_len']]
-                text = body.decode(errors='ignore')
-                self.on_message(header['user_from'], text)
+                elif len(data) > 8:
+                    # Paso 2: Recibir cuerpo del mensaje
+                    body_id = int.from_bytes(data[:8], byteorder='big')
+                    message = data[8:].decode(errors='ignore')
+                    self.on_message("desconocido", message)  # remitente no se transmite aquí
 
             except Exception as e:
                 print(f"[Messaging] Error UDP: {e}")
 
-    def send_message(self, nickname: str, text: str):
+    def send_message(self, nickname: str, text: str) -> bool | None:
         try:
             ip = self._get_peer_ip(nickname)
             msg_bytes = text.encode()
-            hdr = pack_header(self.user_id, nickname, 1, 0, len(msg_bytes))  # op_code = 1
-            self.udp_sock.sendto(hdr + msg_bytes, (ip, LCP_PORT))
+            body_len = len(msg_bytes)
+            body_id = random.randint(0, 255)
+
+            # Paso 1: Enviar encabezado
+            hdr = pack_header(self.user_id, nickname, 1, body_id, body_len)
+            self.udp_sock.sendto(hdr, (ip, LCP_PORT))
+
+            # Paso 2: Esperar confirmación
+            self.udp_sock.settimeout(5.0)
+            try:
+                response, _ = self.udp_sock.recvfrom(1024)
+                if len(response) == RESPONSE_SIZE:
+                    status, _ = unpack_response(response)
+                    if status == 0:
+                        # Paso 3: Enviar cuerpo
+                        payload = body_id.to_bytes(8, byteorder='big') + msg_bytes
+                        self.udp_sock.sendto(payload, (ip, LCP_PORT))
+                        return True
+                    else:
+                        return False
+                else:
+                    print("[Messaging] Respuesta inválida")
+                    return False
+            except socket.timeout:
+                print(f"[Messaging] Sin respuesta de {nickname} (timeout)")
+                return None
         except Exception as e:
             print(f"[Messaging] Error enviando mensaje a {nickname}: {e}")
+            return None
 
     def _serve_tcp(self):
         while True:
@@ -87,30 +117,25 @@ class Messaging:
             sender = hdr['user_from']
 
             path = Path("Descargas") / filename
-            with open(path, "wb") as f:
-                while chunk := conn.recv(1024):
-                    f.write(chunk)
+            path.parent.mkdir(parents=True, exist_ok=True)
 
-            self.on_file(sender, str(path))
+            file_id_bytes = conn.recv(8)
+            file_content = b""
+            bytes_to_read = hdr['body_len'] - 8
 
+            while bytes_to_read > 0:
+                chunk = conn.recv(min(4096, bytes_to_read))
+                if not chunk:
+                    break
+                file_content += chunk
+                bytes_to_read -= len(chunk)
+
+            path.write_bytes(file_content)
+
+            self.on_file(sender, filename)
+
+            conn.sendall(pack_response(0, self.user_id))
         except Exception as e:
-            print(f"[Messaging] Error recibiendo archivo: {e}")
+            print(f"[Messaging] Error manejando TCP: {e}")
         finally:
             conn.close()
-
-    def send_file(self, nickname: str, filepath: str):
-        try:
-            ip = self._get_peer_ip(nickname)
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect((ip, LCP_PORT))
-
-            filename = Path(filepath).name
-            hdr = pack_header(self.user_id, filename, 2)  # op_code = 2
-            sock.sendall(hdr)
-            with open(filepath, "rb") as f:
-                while chunk := f.read(1024):
-                    sock.sendall(chunk)
-            sock.close()
-
-        except Exception as e:
-            print(f"[Messaging] Error enviando archivo a {nickname}: {e}")

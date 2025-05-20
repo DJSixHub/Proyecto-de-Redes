@@ -124,10 +124,15 @@ if peer:
 
     msg = st.chat_input(f"Mensaje para {peer}")
     if msg:
-        st.session_state.messaging.send_message(peer, msg)
-        st.session_state.history.setdefault(peer, []).append(('yo', msg))
-        save_json(HISTORY_FILE, st.session_state.history)
-        st.rerun()
+        result = st.session_state.messaging.send_message(peer, msg)
+        if result is True:
+            st.session_state.history.setdefault(peer, []).append(('yo', msg))
+            save_json(HISTORY_FILE, st.session_state.history)
+            st.rerun()
+        elif result is False:
+            st.warning(f"❌ {peer} rechazó el mensaje.")
+        else:
+            st.warning(f"⚠️ No hubo respuesta de {peer}.")
 
     uploaded = st.file_uploader("📁 Enviar archivo", key='file')
     if uploaded and st.button("📤 Subir"):
@@ -146,8 +151,14 @@ st.subheader("📢 Enviar a todos los vecinos")
 
 msg_group = st.text_input("Mensaje grupal", key="group_input")
 if st.button("Enviar a todos"):
+    any_sent = False
     for nick in peer_list:
-        st.session_state.messaging.send_message(nick, msg_group)
-        st.session_state.history.setdefault(nick, []).append(('yo', f"[broadcast] {msg_group}"))
+        result = st.session_state.messaging.send_message(nick, msg_group)
+        if result is True:
+            st.session_state.history.setdefault(nick, []).append(('yo', f"[broadcast] {msg_group}"))
+            any_sent = True
     save_json(HISTORY_FILE, st.session_state.history)
-    st.success("Mensaje enviado a todos.")
+    if any_sent:
+        st.success("Mensaje enviado a todos los que respondieron OK.")
+    else:
+        st.warning("⚠️ Ningún peer respondió correctamente.")
