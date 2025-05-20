@@ -3,7 +3,6 @@ import threading
 from pathlib import Path
 from protocol import (
     pack_header, unpack_header,
-    pack_response, unpack_response,
     HEADER_SIZE
 )
 
@@ -14,7 +13,7 @@ class Messaging:
         self.user_id = user_id
         self.on_message = on_message
         self.on_file = on_file
-        self._peer_map = {}  # peer_mac -> {'nick': ..., 'ip': ...}
+        self._peer_map = {}  # nickname -> IP
 
         if udp_sock:
             self.udp_sock = udp_sock
@@ -34,15 +33,10 @@ class Messaging:
     def update_peers(self, peer_dict):
         self._peer_map = peer_dict
 
-    def _get_peer_ip(self, peer_mac: str) -> str:
-        if peer_mac in self._peer_map:
-            return self._peer_map[peer_mac]['ip']
-        raise ValueError(f"No se encontró IP para {peer_mac}")
-
-    def _get_peer_nick(self, peer_mac: str) -> str:
-        if peer_mac in self._peer_map:
-            return self._peer_map[peer_mac]['nick']
-        return peer_mac
+    def _get_peer_ip(self, nickname: str) -> str:
+        if nickname in self._peer_map:
+            return self._peer_map[nickname]
+        raise ValueError(f"No se encontró IP para {nickname}")
 
     def _serve_udp(self):
         while True:
@@ -59,16 +53,12 @@ class Messaging:
                 payload = data[HEADER_SIZE:]
 
                 if len(payload) < total_len:
-                    # truncado
-                    print("[Messaging] Mensaje truncado, ignorado.")
                     continue
 
-                sender = header['user_from']
-                sender_nick, sender_mac = sender.split('|') if '|' in sender else (sender, sender)
-
+                sender_nick = header['user_from']
                 text = payload[:total_len].decode(errors='ignore')
 
-                self.on_message(sender_mac, text)
+                self.on_message(sender_nick, text)
 
             except Exception as e:
                 print(f"[Messaging] Error UDP: {e}")
@@ -88,9 +78,8 @@ class Messaging:
                 return
             hdr = unpack_header(header)
 
-            sender = hdr['user_from']
-            sender_nick, sender_mac = sender.split('|') if '|' in sender else (sender, sender)
-            filename = hdr['user_to']  # usamos 'user_to' para pasar nombre del archivo
+            sender_nick = hdr['user_from']
+            filename = hdr['user_to']
 
             path = Path("Descargas") / filename
             with open(path, "wb") as f:
@@ -100,31 +89,25 @@ class Messaging:
                         break
                     f.write(chunk)
 
-            self.on_file(sender_mac, str(path))
+            self.on_file(sender_nick, str(path))
 
         except Exception as e:
             print(f"[Messaging] Error archivo: {e}")
         finally:
             conn.close()
 
-    def send_message(self, peer_mac: str, msg: str):
+    def send_message(self, nickname: str, msg: str):
         try:
-            ip = self._get_peer_ip(peer_mac)
-            nick = self._peer_map[peer_mac]['nick']
-            full_id = f"{nick}|{peer_mac}"
-
-            hdr = pack_header(self.user_id, '', 2, 0, len(msg.encode()))
+            ip = self._get_peer_ip(nickname)
+            hdr = pack_header(self.user_id, nickname, 2, 0, len(msg.encode()))
             packet = hdr + msg.encode()
             self.udp_sock.sendto(packet, (ip, LCP_PORT))
         except Exception as e:
-            print(f"[Messaging] Error enviando mensaje a {peer_mac}: {e}")
+            print(f"[Messaging] Error mensaje a {nickname}: {e}")
 
-    def send_file(self, peer_mac: str, filepath: str):
+    def send_file(self, nickname: str, filepath: str):
         try:
-            ip = self._get_peer_ip(peer_mac)
-            nick = self._peer_map[peer_mac]['nick']
-            full_id = f"{nick}|{peer_mac}"
-
+            ip = self._get_peer_ip(nickname)
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((ip, LCP_PORT))
 
@@ -136,4 +119,4 @@ class Messaging:
                     sock.sendall(chunk)
             sock.close()
         except Exception as e:
-            print(f"[Messaging] Error enviando archivo a {peer_mac}: {e}")
+            print(f"[Messaging] Error archivo a {nickname}: {e}")
