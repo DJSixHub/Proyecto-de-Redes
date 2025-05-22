@@ -5,7 +5,7 @@ import sys
 import streamlit as st
 from datetime import datetime
 
-# --- Ajuste de sys.path para importar core/ y persistence/ ---
+# Ajustar sys.path para importar core/
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
@@ -17,11 +17,8 @@ from core.engine import Engine
 if 'user_id' not in st.session_state or not st.session_state['user_id']:
     st.title("LCP Chat Interface")
     with st.form("login_form"):
-        st.text_input(
-            "Ingresa tu User ID (max 20 caracteres):",
-            key="input_user_id",
-            max_chars=20
-        )
+        st.text_input("Ingresa tu User ID (max 20 caracteres):",
+                      key="input_user_id", max_chars=20)
         if st.form_submit_button("Confirmar") and st.session_state["input_user_id"]:
             st.session_state['user_id'] = st.session_state["input_user_id"]
     st.stop()
@@ -36,27 +33,37 @@ if 'engine' not in st.session_state:
 else:
     engine = st.session_state['engine']
 
-# 3️⃣ Sidebar: Usuario e IP
+# 3️⃣ Sidebar: Usuario, IP y acciones
 st.sidebar.title(f"Usuario: {user}")
 st.sidebar.markdown(
     f"<p style='font-size:12px; color:gray;'>IP: {engine.discovery.local_ip}</p>",
     unsafe_allow_html=True
 )
+if st.sidebar.button("🔍 Buscar Peers"):
+    engine.discovery.force_discover()
+    st.sidebar.success("Búsqueda de peers forzada")
 
-# 4️⃣ Cargar peers desde persistencia con status
-peers_map = engine.peers_store.load()  # raw_uid bytes → {'ip','last_seen','status'}
+# 4️⃣ Construir listas de peers
+OFFLINE_THRESHOLD = 20.0
+now = datetime.utcnow()
+raw_peers = engine.discovery.get_peers()  # raw_id_bytes → {'ip','last_seen'}
 
-current_peers = [
-    uid.decode('utf-8')
-    for uid, info in peers_map.items()
-    if info.get('status') == 'connected'
-]
+# Mapear raw_id_bytes ↔ display name (sin padding)
+name_map = {
+    raw: raw.rstrip(b'\x00').decode('utf-8', errors='ignore')
+    for raw in raw_peers
+}
+reverse_map = {v: k for k, v in name_map.items()}
 
-previous_peers = [
-    uid.decode('utf-8')
-    for uid, info in peers_map.items()
-    if info.get('status') == 'disconnected'
-]
+current_peers = []
+previous_peers = []
+for raw_id, info in raw_peers.items():
+    name = name_map[raw_id]
+    age = (now - info['last_seen']).total_seconds()
+    if age < OFFLINE_THRESHOLD:
+        current_peers.append(name)
+    else:
+        previous_peers.append(name)
 
 # 5️⃣ Selección de peer
 if 'selected_peer' not in st.session_state:
@@ -100,36 +107,35 @@ if st.sidebar.button("Enviar Mensaje Global"):
     if msg_global:
         try:
             engine.messaging.send_all(msg_global.encode('utf-8'))
-            st.sidebar.success("Mensaje global enviado a todos los peers conectados")
+            st.sidebar.success("Mensaje global enviado")
         except Exception as e:
-            st.sidebar.error(f"Error al enviar mensaje global: {e}")
+            st.sidebar.error(f"Error: {e}")
     else:
-        st.sidebar.error("Por favor escribe algo antes de enviar")
+        st.sidebar.error("Por favor escribe algo")
 
 # 7️⃣ Chat principal
-peer = st.session_state['selected_peer']
-if peer:
-    st.header(f"Chateando con: {peer}")
+peer_name = st.session_state['selected_peer']
+if peer_name:
+    st.header(f"Chateando con: {peer_name}")
 
-    # Recuperar conversación histórica con este peer
-    conv = engine.history_store.get_conversation(peer)
+    # Recuperar conversación con este peer
+    conv = engine.history_store.get_conversation(peer_name)
     for entry in conv:
-        if entry['type'] == 'message':
-            author = entry['sender']
-            with st.chat_message(author):
+        author = entry['sender']
+        with st.chat_message(author):
+            if entry['type'] == 'message':
                 st.write(entry['message'])
-        elif entry['type'] == 'file':
-            author = entry['sender']
-            with st.chat_message(author):
+            else:
                 st.write(f"[Archivo] {entry['filename']}")
 
-    # Entrada de nuevo mensaje fija abajo
-    new_msg = st.chat_input("Escribe tu mensaje...")
-    if new_msg:
+    # Entrada fija de mensaje
+    msg = st.chat_input("Escribe tu mensaje...")
+    if msg:
         try:
+            raw_id = reverse_map[peer_name]
             engine.messaging.send(
-                peer.encode('utf-8'),
-                new_msg.encode('utf-8')
+                raw_id,
+                msg.encode('utf-8')
             )
         except Exception as e:
             st.error(str(e))
