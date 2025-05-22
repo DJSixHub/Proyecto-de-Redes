@@ -11,93 +11,99 @@ from core.protocol import (
     pack_header,
     unpack_header,
     pack_response,
-    HEADER_SIZE
+    unpack_response,
+    HEADER_SIZE,
+    RESPONSE_SIZE
 )
 
+OFFLINE_THRESHOLD = 20.0  # segundos para considerar un peer desconectado
 
 class Discovery:
     """
     Envía Echo-Request periódicos y mantiene el mapa de peers.
-    La recepción de Echo-Request se procesa en handle_echo().
+    Procesa:
+      - Echo-Request (op_code=0) → handle_echo()
+      - Echo-Reply (RESPONSE_FMT)   → handle_response()
+    Antes de persistir, añade campo 'status' = 'connected'|'disconnected'
+    según last_seen.
     """
 
-    def __init__(self,
-                 user_id: bytes,
-                 broadcast_interval: float = 1.0,
+    def __init__(self, user_id: bytes, broadcast_interval: float = 1.0,
                  peers_store=None):
-        # UID sin padding y UID padded
         self.raw_id = user_id.rstrip(b'\x00')
         self.user_id = self.raw_id.ljust(20, b'\x00')
-
         self.broadcast_interval = broadcast_interval
         self.peers_store = peers_store
 
-        # IP de la interfaz principal (normalmente Wi-Fi)
+        # IP local para filtrar
         hostname = socket.gethostname()
         self.local_ip = socket.gethostbyname(hostname)
 
-        # Diccionario de peers descubiertos
-        # { uid_bytes: {'ip': str, 'last_seen': datetime} }
+        # Mapa interno: raw_peer_id → {'ip', 'last_seen': datetime}
         self.peers = {}
 
-        # Socket UDP ligado a la IP local
+        # Socket UDP escuchando todas las interfaces
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.sock.bind((self.local_ip, UDP_PORT))
+        self.sock.bind(('', UDP_PORT))
 
-        # Hilo de broadcast
         threading.Thread(target=self._broadcast_loop, daemon=True).start()
-        # Hilo de persistencia (si se proporcionó peers_store)
         if self.peers_store:
             threading.Thread(target=self._persist_loop, daemon=True).start()
 
     def _broadcast_loop(self):
-        """Envía un Echo-Request de broadcast cada intervalo."""
         while True:
-            pkt = pack_header(
-                user_from=self.user_id,
-                user_to=BROADCAST_UID,
-                op_code=0
-            )
+            pkt = pack_header(self.user_id, BROADCAST_UID, op_code=0)
             self.sock.sendto(pkt, ('<broadcast>', UDP_PORT))
             time.sleep(self.broadcast_interval)
 
     def _persist_loop(self):
-        """Guarda el mapa de peers a disco cada 5 segundos."""
+        """
+        Cada 5s calcula status según last_seen y persiste:
+        { raw_peer_id: {'ip','last_seen','status'} }
+        """
         while True:
             time.sleep(5)
-            # Persistir sin limpiar; el Engine carga y filtra local_ip
-            self.peers_store.save(self.peers)
+            now = datetime.utcnow()
+            to_save = {}
+            for uid, info in self.peers.items():
+                age = (now - info['last_seen']).total_seconds()
+                status = 'connected' if age < OFFLINE_THRESHOLD else 'disconnected'
+                to_save[uid] = {
+                    'ip': info['ip'],
+                    'last_seen': info['last_seen'],
+                    'status': status
+                }
+            self.peers_store.save(to_save)
 
     def handle_echo(self, data: bytes, addr):
-        """
-        Procesa un Echo-Request (op_code=0):
-        - Responde con Echo-Reply.
-        - Actualiza self.peers (ignorando a uno mismo y duplicados).
-        """
         hdr = unpack_header(data[:HEADER_SIZE])
-        peer_id = hdr['user_from']
+        peer_id = hdr['user_from'].rstrip(b'\x00')
         peer_ip = addr[0]
-
-        # Ignorar si es uno mismo
         if peer_id == self.raw_id or peer_ip == self.local_ip:
             return
+        # responder
+        self.sock.sendto(pack_response(0, self.user_id), addr)
+        # eliminar UID viejo para esa IP
+        for uid in list(self.peers):
+            if self.peers[uid]['ip'] == peer_ip and uid != peer_id:
+                del self.peers[uid]
+        # registrar/actualizar
+        self.peers[peer_id] = {'ip': peer_ip, 'last_seen': datetime.utcnow()}
 
-        # Responder Echo-Reply
-        reply = pack_response(status=0, responder=self.user_id)
-        self.sock.sendto(reply, addr)
-
-        # Ignorar duplicados por IP
-        if any(info['ip'] == peer_ip for info in self.peers.values()):
+    def handle_response(self, data: bytes, addr):
+        resp = unpack_response(data[:RESPONSE_SIZE])
+        peer_id = resp['responder'].rstrip(b'\x00')
+        peer_ip = addr[0]
+        if resp['status'] != 0 or peer_id == self.raw_id or peer_ip == self.local_ip:
             return
-
-        # Registrar nuevo peer
-        self.peers[peer_id] = {
-            'ip': peer_ip,
-            'last_seen': datetime.utcnow()
-        }
+        # eliminar UID viejo para esa IP
+        for uid in list(self.peers):
+            if self.peers[uid]['ip'] == peer_ip and uid != peer_id:
+                del self.peers[uid]
+        # registrar/actualizar
+        self.peers[peer_id] = {'ip': peer_ip, 'last_seen': datetime.utcnow()}
 
     def get_peers(self) -> dict:
-        """Devuelve una copia del mapa actual de peers."""
         return self.peers.copy()
