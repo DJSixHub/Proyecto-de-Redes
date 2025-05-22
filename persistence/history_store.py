@@ -3,51 +3,28 @@
 import os
 import json
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Any
 
 class HistoryStore:
     """
-    Historial de mensajes y archivos.
-    Cada entrada incluye sender, recipient, message/filename, timestamp.
+    Maneja historial persistente de mensajes y archivos.
+    Cada entrada: {'type', 'sender', 'recipient', 'message|filename', 'timestamp'}
     """
 
     def __init__(self, filename: str = "history.json"):
         folder = os.path.dirname(os.path.abspath(__file__))
         self.path = os.path.join(folder, filename)
         os.makedirs(folder, exist_ok=True)
-        # Si no existe, crear como lista vacía
         if not os.path.exists(self.path):
             with open(self.path, 'w', encoding='utf-8') as f:
                 json.dump([], f)
 
-    def load_raw(self) -> List[Dict]:
-        """
-        Lee el archivo JSON sin parsear timestamps.
-        Si el archivo está vacío o es JSON inválido, devuelve [].
-        """
+    def _append(self, entry: Dict[str, Any]):
         try:
-            with open(self.path, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                if not content:
-                    return []
-                return json.loads(content)
-        except (json.JSONDecodeError, FileNotFoundError):
-            return []
+            history = self.load_raw()
+        except Exception:
+            history = []
 
-    def load(self) -> List[Dict]:
-        """
-        Lee y parsea timestamps a datetime.
-        """
-        data = self.load_raw()
-        for e in data:
-            try:
-                e['timestamp'] = datetime.fromisoformat(e['timestamp'])
-            except Exception:
-                e['timestamp'] = None
-        return data
-
-    def _append(self, entry: Dict):
-        history = self.load_raw()
         history.append(entry)
         with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
@@ -72,14 +49,24 @@ class HistoryStore:
         }
         self._append(entry)
 
-    def get_conversation(self, peer: str) -> List[Dict]:
-        """
-        Devuelve la conversación completa (mensajes y archivos)
-        con `peer`, ordenada cronológicamente.
-        """
-        conv = [
-            e for e in self.load()
-            if e.get('type') in ('message', 'file')
-               and (e.get('sender') == peer or e.get('recipient') == peer)
+    def get_conversation(self, peer: str) -> List[Dict[str, Any]]:
+        """Devuelve la conversación entre el usuario actual y el peer indicado."""
+        try:
+            history = self.load_raw()
+        except Exception:
+            return []
+
+        return [
+            item for item in history
+            if item.get('sender') == peer or item.get('recipient') == peer
         ]
-        return sorted(conv, key=lambda e: e.get('timestamp') or datetime.min)
+
+    def load_raw(self) -> List[Dict[str, Any]]:
+        """Carga el historial bruto desde el archivo JSON."""
+        if not os.path.exists(self.path):
+            return []
+        with open(self.path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if not content:
+                return []
+            return json.loads(content)

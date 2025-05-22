@@ -4,6 +4,7 @@ import os
 import sys
 import streamlit as st
 from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
 # --- Ajuste de sys.path para importar core/ y persistence/ ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,7 +37,10 @@ if 'engine' not in st.session_state:
 else:
     engine = st.session_state['engine']
 
-# 3️⃣ Sidebar: Usuario, IP y acciones
+# 3️⃣ Refrescar cada 3 segundos (para recibir mensajes automáticamente)
+st_autorefresh(interval=3000, key="auto_refresh")
+
+# 4️⃣ Sidebar: Usuario, IP y acciones
 st.sidebar.title(f"Usuario: {user}")
 st.sidebar.markdown(
     f"<p style='font-size:12px; color:gray;'>IP: {engine.discovery.local_ip}</p>",
@@ -46,20 +50,20 @@ if st.sidebar.button("🔍 Buscar Peers"):
     engine.discovery.force_discover()
     st.sidebar.success("Búsqueda de peers forzada")
 
-# 4️⃣ Construir listas de peers desde discovery
+# 5️⃣ Cargar peers actuales y anteriores
 now = datetime.utcnow()
 OFFLINE_THRESHOLD = 20.0
+raw_peers = engine.discovery.get_peers()
 
-raw_peers = engine.discovery.get_peers()  # { raw_uid: {'ip','last_seen'} }
-
-# Mapear UID bytes → display name (sin padding)
 name_map = {
     uid: uid.rstrip(b'\x00').decode('utf-8', errors='ignore')
     for uid in raw_peers
 }
+reverse_map = {v: k for k, v in name_map.items()}
 
 current_peers = []
 previous_peers = []
+
 for uid, info in raw_peers.items():
     name = name_map[uid]
     age = (now - info['last_seen']).total_seconds()
@@ -68,7 +72,7 @@ for uid, info in raw_peers.items():
     else:
         previous_peers.append(name)
 
-# 5️⃣ Dropdowns retornan selección directamente
+# 6️⃣ Selección de peer
 st.sidebar.subheader("Peers Conectados")
 selected_current = st.sidebar.selectbox(
     "Selecciona un peer actual",
@@ -85,10 +89,9 @@ selected_previous = st.sidebar.selectbox(
 if selected_previous == "Ninguno":
     selected_previous = None
 
-# Determinar peer seleccionado: preferir actual sobre anterior
 peer_name = selected_current or selected_previous
 
-# 6️⃣ Mensaje Global
+# 7️⃣ Mensaje Global
 st.sidebar.subheader("Mensaje Global")
 msg_global = st.sidebar.text_area("Escribe tu mensaje global aquí:")
 if st.sidebar.button("Enviar Mensaje Global"):
@@ -101,31 +104,32 @@ if st.sidebar.button("Enviar Mensaje Global"):
     else:
         st.sidebar.error("Por favor escribe algo antes de enviar")
 
-# 7️⃣ Chat principal
+# 8️⃣ Área principal de chat
 if peer_name:
     st.header(f"Chateando con: {peer_name}")
 
-    # Conversación histórica con este peer
+    # Mostrar conversación histórica
     conv = engine.history_store.get_conversation(peer_name)
     for entry in conv:
-        author = "Yo" if entry['sender'] == user else entry['sender']
+        author = "user" if entry['sender'] == user else entry['sender']
         with st.chat_message(author):
             if entry['type'] == 'message':
                 st.write(entry['message'])
             else:
                 st.write(f"[Archivo] {entry['filename']}")
 
-    # Entrada fija de nuevo mensaje
-    new_msg = st.chat_input("Escribe tu mensaje...")
-    if new_msg:
+    # Entrada de nuevo mensaje
+    msg = st.chat_input("Escribe tu mensaje...")
+    if msg:
+        st.session_state["__msg_pending__"] = msg
+
+    if "__msg_pending__" in st.session_state:
         try:
-            # Convertir display name a raw UID bytes
-            raw_uid = next(uid for uid, name in name_map.items() if name == peer_name)
-            engine.messaging.send(raw_uid, new_msg.encode('utf-8'))
-            # El st.chat_input provoca rerun automáticamente
-        except StopIteration:
-            st.error("Peer no encontrado en discovery.")
+            raw_uid = reverse_map[peer_name]
+            engine.messaging.send(raw_uid, st.session_state["__msg_pending__"].encode('utf-8'))
+            del st.session_state["__msg_pending__"]
         except Exception as e:
             st.error(str(e))
+
 else:
     st.write("Selecciona un peer en la barra lateral para comenzar a chatear.")
