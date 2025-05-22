@@ -28,7 +28,7 @@ if 'user_id' not in st.session_state or not st.session_state['user_id']:
 
 user = st.session_state['user_id']
 
-# --- Paso 2: arrancar Engine solo una vez ---
+# --- Paso 2: arrancar Engine una sola vez ---
 if 'engine' not in st.session_state:
     engine = Engine(user_id=user)
     engine.start()
@@ -36,8 +36,13 @@ if 'engine' not in st.session_state:
 else:
     engine = st.session_state['engine']
 
+# Obtener la IP usada
+local_ip = engine.discovery.local_ip
+
 # --- Paso 3: barra lateral ---
 st.sidebar.title(f"Usuario: {user}")
+# Mostrar IP en tamaño pequeño
+st.sidebar.markdown(f"<p style='font-size:12px; color:gray;'>IP: {local_ip}</p>", unsafe_allow_html=True)
 
 # Peers actualmente conectados
 current_peers = [uid.decode('utf-8') for uid in engine.discovery.get_peers().keys()]
@@ -89,12 +94,11 @@ if st.sidebar.button("Enviar Mensaje Global"):
     if msg_global:
         engine.messaging.send_all(msg_global.encode('utf-8'))
         st.sidebar.success("Mensaje global enviado a todos los peers conectados")
-        # Limpiar el área de texto
         st.session_state["global_message_input"] = ""
     else:
         st.sidebar.error("Por favor escribe algo antes de enviar")
 
-# --- Paso 4: área principal de chat ---
+# --- Paso 4: cargar conversación histórica automáticamente ---
 peer = st.session_state['selected_peer']
 if peer:
     st.header(f"Chateando con: {peer}")
@@ -111,14 +115,15 @@ if peer:
                 with st.chat_message("Yo", is_user=True):
                     st.write(entry['message'])
         elif entry['type'] == 'file':
-            label = "[Archivo recibido]" if entry['sender'] == peer else "[Archivo enviado]"
-            author = peer if entry['sender'] == peer else "Yo"
-            is_user = (entry['sender'] != peer)
-            with st.chat_message(author, is_user=is_user):
-                st.write(f"{label} {entry['filename']}")
+            if entry['sender'] == peer:
+                with st.chat_message(peer):
+                    st.write(f"[Archivo recibido] {entry['filename']}")
+            else:
+                with st.chat_message("Yo", is_user=True):
+                    st.write(f"[Archivo enviado] {entry['filename']}")
 
     # Entrada de nuevo mensaje fija al fondo
-    msg = st.chat_input("Escribe tu mensaje...")
+    msg = st.chat_input("Escribe tu mensaje...", key="new_message")
     if msg:
         engine.messaging.send(
             peer.encode('utf-8'),

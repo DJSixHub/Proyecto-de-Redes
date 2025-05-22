@@ -18,42 +18,40 @@ from persistence.history_store import HistoryStore
 class Engine:
     """
     Orquesta Discovery, Messaging y persistencia.
-    Limpia automáticamente peers.json al arranque para:
-      - Eliminar entradas con IP local
-      - Quitar duplicados de misma IP, conservando el más reciente
+    Filtra peers locales al cargar el JSON guardado.
     """
 
     def __init__(self,
                  user_id: bytes,
                  broadcast_interval: float = 1.0):
-        # Normalizar user_id a bytes y 20 bytes de longitud
+        # Normalizar user_id a 20 bytes
         if isinstance(user_id, str):
             user_id = user_id.encode('utf-8')
         raw_id = user_id
         self.user_id = raw_id.ljust(20, b'\x00')[:20]
 
-        # --- Persistencia ---
+        # Persistencia
         self.peers_store = PeersStore()      # persistence/peers.json
         self.history_store = HistoryStore()  # persistence/history.json
 
-        # --- Discovery ---
-        # Primero instanciar Discovery para obtener local_ips
+        # Discovery (broadcast periódico y persistencia)
         self.discovery = Discovery(
             user_id=self.user_id,
             broadcast_interval=broadcast_interval,
             peers_store=self.peers_store
         )
 
-        # Limpieza automática de peers.json
-        self.peers_store.clean(local_ips=self.discovery.local_ips)
+        # Cargar peers previos y filtrar la IP local
+        loaded = self.peers_store.load()  # { uid_bytes: {'ip', 'last_seen'} }
+        local_ip = self.discovery.local_ip
+        filtered = {
+            uid: info
+            for uid, info in loaded.items()
+            if info['ip'] != local_ip
+        }
+        self.discovery.peers.update(filtered)
 
-        # Cargar peers limpios (ya sin IPs locales ni duplicados)
-        loaded = self.peers_store.load()  # { uid_bytes: info }
-
-        # Inyectar en memoria
-        self.discovery.peers.update(loaded)
-
-        # --- Mensajería ---
+        # Mensajería
         self.messaging = Messaging(
             user_id=self.user_id,
             discovery=self.discovery,
@@ -62,7 +60,7 @@ class Engine:
 
     def start(self):
         """
-        Arranca el loop de recepción de mensajes.
+        Arranca el hilo de recepción de mensajes.
         Discovery ya inició broadcast y persistencia en su constructor.
         """
         recv_thread = threading.Thread(
