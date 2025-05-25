@@ -117,5 +117,19 @@
     "recipient": "pepe",
     "message": "lirili lailia",
     "timestamp": "2025-05-25T17:38:31.048438"
+  },
+  {
+    "type": "message",
+    "sender": "Tralalelo Tralala",
+    "recipient": "lirili lalila",
+    "message": "papua",
+    "timestamp": "2025-05-25T17:40:07.963536"
+  },
+  {
+    "type": "message",
+    "sender": "lirili lalila",
+    "recipient": "Tralalelo Tralala",
+    "message": "nueva guinea",
+    "timestamp": "2025-05-25T17:40:12.636307"
   }
 ]

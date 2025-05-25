@@ -19,51 +19,52 @@ from core.protocol import (
 class Messaging:
     """
     Comunicación con protocolo LCP (HEADER → ACK → BODY → ACK).
-    Usa un solo reader (recv_loop) y una cola de ACKs
-    para que send() nunca compita en recvfrom().
+    Usa un solo reader (recv_loop) y cola de ACKs para coordinar send()/send_file().
     """
 
     def __init__(self, user_id: bytes, discovery, history_store):
-        # Normalizar UID a 20 bytes
         trimmed = user_id.rstrip(b'\x00')
         self.user_id = trimmed.ljust(20, b'\x00')
         self.discovery = discovery
         self.history_store = history_store
 
-        # Reutiliza el socket de discovery
         self.sock = discovery.sock
         self.sock.setblocking(True)
         self.sock.settimeout(None)
 
-        # Estructura para coordinar ACKs
-        self._acks = {}             # responder_uid (bytes sin \x00) -> threading.Event
+        # Para coordinar ACKs
+        self._acks = {}             # responder_uid -> threading.Event
         self._acks_lock = threading.Lock()
 
-    def send(self, recipient: bytes, message: bytes, timeout: float = 2.0):
+    def _send_and_wait(self, data: bytes, recipient: bytes, timeout: float = 2.0):
         """
-        Envía un mensaje con handshake completo:
-          1) HEADER → espera ACK
-          2) BODY   → espera ACK
-        Levanta TimeoutError si no llega ACK.
+        Envia `data` a `recipient` y espera el ACK (RESPONSE_SIZE + status=0).
         """
         info = self.discovery.get_peers().get(recipient)
         if not info:
             raise ValueError("Peer no encontrado en discovery")
         dest = (info['ip'], UDP_PORT)
 
-        # Helper local para registrar y esperar ACK
-        def _send_and_wait(data: bytes):
-            ev = threading.Event()
-            key = recipient.rstrip(b'\x00')
-            with self._acks_lock:
-                self._acks[key] = ev
-            self.sock.sendto(data, dest)
-            ok = ev.wait(timeout)
-            with self._acks_lock:
-                self._acks.pop(key, None)
-            if not ok:
-                raise TimeoutError(f"No se recibió ACK de {recipient!r}")
+        ev = threading.Event()
+        key = recipient.rstrip(b'\x00')
+        with self._acks_lock:
+            self._acks[key] = ev
 
+        self.sock.sendto(data, dest)
+        ok = ev.wait(timeout)
+
+        with self._acks_lock:
+            self._acks.pop(key, None)
+
+        if not ok:
+            raise TimeoutError(f"No se recibió ACK de {recipient!r}")
+
+    def send(self, recipient: bytes, message: bytes, timeout: float = 2.0):
+        """
+        Envía un mensaje de texto:
+          1) HEADER(op_code=1) → ACK
+          2) BODY (message)   → ACK
+        """
         # 1) Header
         header = pack_header(
             user_from=self.user_id,
@@ -72,59 +73,75 @@ class Messaging:
             body_id=0,
             body_len=len(message)
         )
-        _send_and_wait(header)
+        self._send_and_wait(header, recipient, timeout)
 
         # 2) Body
-        _send_and_wait(message)
+        self._send_and_wait(message, recipient, timeout)
+
+    def send_file(self, recipient: bytes, file_bytes: bytes, filename: str, timeout: float = 5.0):
+        """
+        Envía un archivo:
+          1) HEADER(op_code=2) → ACK
+          2) BODY (2B name_len + filename + file_bytes) → ACK
+        """
+        # preparar body
+        name_b = filename.encode('utf-8')
+        if len(name_b) > 0xFFFF:
+            raise ValueError("Nombre de archivo demasiado largo")
+        body = len(name_b).to_bytes(2, 'big') + name_b + file_bytes
+
+        # 1) Header
+        header = pack_header(
+            user_from=self.user_id,
+            user_to=recipient,
+            op_code=2,
+            body_id=0,
+            body_len=len(body)
+        )
+        self._send_and_wait(header, recipient, timeout)
+
+        # 2) Body
+        self._send_and_wait(body, recipient, timeout)
 
     def broadcast(self, message: bytes):
-        """Envía el mismo mensaje a todos los peers (salta BROADCAST_UID)."""
-        for peer_id, info in self.discovery.get_peers().items():
+        """Envía un mensaje de texto a todos los peers."""
+        for peer_id in self.discovery.get_peers():
             if peer_id == BROADCAST_UID:
                 continue
             try:
                 self.send(peer_id, message)
-            except Exception:
+            except:
                 pass
 
     def send_all(self, message: bytes):
-        """
-        Alias para compatibilidad con la interfaz:
-        envía mensaje global a todos los peers.
-        """
+        """Alias para compatibilidad: envía un mensaje de texto global."""
         return self.broadcast(message)
 
     def start_listening(self):
-        """Arranca recv_loop en hilo daemon."""
         threading.Thread(target=self.recv_loop, daemon=True).start()
 
     def recv_loop(self):
-        """
-        Lee TODO del socket:
-         - Si len==RESPONSE_SIZE: desempaqueta ACK y lo despacha a quien lo espera.
-         - Si len>=HEADER_SIZE: procesa discovery o mensaje (header+body).
-        """
         while True:
             data, addr = self.sock.recvfrom(4096)
 
-            # --- 1) Posible ACK ---
+            # 1) ¿Es un ACK?
             if len(data) == RESPONSE_SIZE:
                 try:
                     resp = unpack_response(data)
-                except Exception:
+                except:
                     continue
                 if resp['status'] == 0:
-                    responder = resp['responder'].rstrip(b'\x00')
+                    r = resp['responder'].rstrip(b'\x00')
                     with self._acks_lock:
-                        ev = self._acks.get(responder)
+                        ev = self._acks.get(r)
                     if ev:
                         ev.set()
                         continue
-                # si no era un ACK que esperábamos, pasa a discovery:
+                # si no era nuestro ACK, lo pasa a discovery
                 self.discovery.handle_response(data, addr)
                 continue
 
-            # --- 2) Mensaje o discovery (cabecera) ---
+            # 2) ¿Es una cabecera de mensaje o discovery?
             if len(data) < HEADER_SIZE:
                 continue
 
@@ -135,20 +152,17 @@ class Messaging:
                 self.discovery.handle_echo(data, addr)
                 continue
 
-            # Mensaje o archivo dirigido a mí
+            # Mensaje/archivo dirigido a mí
             if hdr['op_code'] in (1, 2) and hdr['user_to'].rstrip(b'\x00') == self.user_id.rstrip(b'\x00'):
-                # ACK de la cabecera
+                # ACK cabecera
                 self.sock.sendto(pack_response(0, self.user_id), addr)
-
-                # Recibimos el cuerpo (un solo recv; luego cortamos al tamaño)
+                # leer cuerpo
                 body_len = hdr['body_len']
                 chunk, _ = self.sock.recvfrom(max(body_len, 4096))
                 body = chunk[:body_len]
-
-                # ACK del cuerpo
+                # ACK cuerpo
                 self.sock.sendto(pack_response(0, self.user_id), addr)
-
-                # Despacha el manejo
+                # despachar
                 threading.Thread(
                     target=self._handle_message_or_file,
                     args=(hdr, body),
@@ -160,7 +174,6 @@ class Messaging:
         me   = self.user_id.rstrip(b'\x00').decode('utf-8')
 
         if hdr['op_code'] == 1:
-            # Texto: decodificar y eliminar \x00 finales
             text = body.decode('utf-8', errors='ignore').rstrip('\x00')
             self.history_store.append_message(
                 sender=peer,
@@ -168,9 +181,7 @@ class Messaging:
                 message=text,
                 timestamp=datetime.utcnow()
             )
-
-        elif hdr['op_code'] == 2:
-            # Archivo: nombre + datos
+        else:  # archivo
             name_len = int.from_bytes(body[:2], 'big')
             filename = body[2:2 + name_len].decode('utf-8', errors='ignore')
             file_data = body[2 + name_len:]
