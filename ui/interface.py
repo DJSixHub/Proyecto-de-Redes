@@ -117,54 +117,54 @@ if st.sidebar.button("Enviar Mensaje Global"):
 if peer_name:
     st.header(f"Chateando con: {peer_name}")
 
-    # Reunir mensajes privados con este peer...
+    # Mensajes privados con este peer
     private_conv = engine.history_store.get_conversation(peer_name)
-    # ...y también todos los globales que tú enviaste
+    # Tus mensajes globales
     global_conv = engine.history_store.get_conversation("*global*")
-    # Combinar y ordenar por timestamp
-    conv = sorted(
-        private_conv + global_conv,
-        key=lambda e: e['timestamp']
-    )
+    # Combinar y ordenar
+    conv = sorted(private_conv + global_conv, key=lambda e: e['timestamp'])
 
-    # Mostrar con dos columnas
+    # Mostrar cada entrada con st.chat dentro de columnas
     for entry in conv:
         is_me = (entry['sender'] == user)
         left, right = st.columns([3, 3])
-        with (right if is_me else left):
-            prefix = "" if is_me else ""
-            if entry['type'] == 'message':
-                st.write(f"- {entry['message']}")
-            else:
-                st.write(f"[Archivo] {entry['filename']}")
+
+        if is_me:
+            with right:
+                with st.chat_message("user"):
+                    st.write(entry['message'])
+        else:
+            # el remitente puede ser peer_name u otro que envió global
+            sender = entry['sender']
+            with left:
+                with st.chat_message(sender):
+                    st.write(entry['message'])
 
     # Entrada de nuevo mensaje
     msg = st.chat_input("Escribe tu mensaje...")
     if msg:
         st.session_state["__msg_pending__"] = msg
 
-    # Si hay mensaje pendiente, enviarlo y mostrarlo
     if "__msg_pending__" in st.session_state:
         msg_to_send = st.session_state["__msg_pending__"]
         try:
             raw_uid = reverse_map[peer_name]
-            # 1) Enviar
             engine.messaging.send(
                 raw_uid,
                 msg_to_send.encode('utf-8')
             )
-            # 2) Guardar privado en historial
+            # Guardar en historial
             engine.history_store.append_message(
                 sender=user,
                 recipient=peer_name,
                 message=msg_to_send,
                 timestamp=datetime.utcnow()
             )
-            # 3) Mostrar de inmediato en columna derecha
-            _, right = st.columns([3, 3])
+            # Mostrar inmediatamente
+            left, right = st.columns([3, 3])
             with right:
-                st.write(f"- {msg_to_send}")
-
+                with st.chat_message("user"):
+                    st.write(msg_to_send)
         except Exception as e:
             st.error(str(e))
         finally:

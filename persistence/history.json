@@ -75,5 +75,47 @@
     "recipient": "kimikito",
     "message": "bfbfb",
     "timestamp": "2025-05-25T17:35:00.602954"
+  },
+  {
+    "type": "message",
+    "sender": "papa",
+    "recipient": "pepe",
+    "message": "pozuelo",
+    "timestamp": "2025-05-25T17:36:11.466074"
+  },
+  {
+    "type": "message",
+    "sender": "papa",
+    "recipient": "pepe",
+    "message": "yamaha",
+    "timestamp": "2025-05-25T17:36:15.710864"
+  },
+  {
+    "type": "message",
+    "sender": "papa",
+    "recipient": "pepe",
+    "message": "que bola papa",
+    "timestamp": "2025-05-25T17:36:22.530849"
+  },
+  {
+    "type": "message",
+    "sender": "pepe",
+    "recipient": "papa",
+    "message": "jonee el tipazo",
+    "timestamp": "2025-05-25T17:36:28.809448"
+  },
+  {
+    "type": "message",
+    "sender": "papa",
+    "recipient": "*global*",
+    "message": "mensaje global",
+    "timestamp": "2025-05-25T17:36:34.983113"
+  },
+  {
+    "type": "message",
+    "sender": "ssss",
+    "recipient": "pepe",
+    "message": "lirili lailia",
+    "timestamp": "2025-05-25T17:38:31.048438"
   }
 ]
