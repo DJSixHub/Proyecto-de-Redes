@@ -1,51 +1,45 @@
 # persistence/peers_store.py
 
-import os
 import json
-from datetime import datetime
-from typing import Dict, Any
+import os
 
 class PeersStore:
     """
-    Guarda y carga peers con ip, last_seen e status.
+    Guarda y carga el mapa de peers conocido:
+      { uid_bytes: {'ip': 'x.x.x.x', 'last_seen': timestamp}, ... }
+    en un fichero JSON.
     """
 
-    def __init__(self, filename: str = "peers.json"):
-        folder = os.path.dirname(os.path.abspath(__file__))
-        self.path = os.path.join(folder, filename)
-        os.makedirs(folder, exist_ok=True)
-        if not os.path.exists(self.path):
-            with open(self.path, 'w', encoding='utf-8') as f:
-                json.dump({}, f)
+    def __init__(self, path='peers.json'):
+        # Puedes parametrizar la ruta si lo deseas
+        self.path = path
 
-    def save(self, peers: Dict[bytes, Dict[str, Any]]):
+    def load(self):
         """
-        peers: raw_uid bytes → {'ip': str, 'last_seen': datetime, 'status': str}
-        """
-        serial = {}
-        for uid, info in peers.items():
-            key = uid.decode('utf-8')
-            serial[key] = {
-                'ip': info['ip'],
-                'last_seen': info['last_seen'].isoformat(),
-                'status': info['status']
-            }
-        with open(self.path, 'w', encoding='utf-8') as f:
-            json.dump(serial, f, ensure_ascii=False, indent=2)
-
-    def load(self) -> Dict[bytes, Dict[str, Any]]:
-        """
-        Devuelve raw_uid bytes → {'ip', 'last_seen': datetime, 'status'}
+        Intenta cargar el JSON de peers. 
+        Si el fichero no existe, está vacío o es inválido,
+        devuelve un dict vacío en vez de lanzar excepción.
         """
         if not os.path.exists(self.path):
             return {}
-        with open(self.path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        result = {}
-        for key, info in data.items():
-            result[key.encode('utf-8')] = {
-                'ip': info['ip'],
-                'last_seen': datetime.fromisoformat(info['last_seen']),
-                'status': info.get('status', 'connected')
-            }
-        return result
+
+        try:
+            with open(self.path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Asegurarse que devuelve un dict
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, ValueError):
+            # Fichero vacío o JSON malformado
+            return {}
+
+    def save(self, peers_dict):
+        """
+        Serializa el dict de peers a JSON, creando/reescribiendo el fichero.
+        """
+        # Asegurarse de la carpeta existe si usas rutas con subdirectorios
+        directory = os.path.dirname(self.path)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+
+        with open(self.path, 'w', encoding='utf-8') as f:
+            json.dump(peers_dict, f, ensure_ascii=False, indent=2)
