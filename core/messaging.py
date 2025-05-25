@@ -31,26 +31,26 @@ class Messaging:
 
     def _wait_for_ack(self, expected_from: bytes, timeout: float = 2.0):
         """
-        Espera un ACK válido, con timeout.  
-        Filtra sólo datagramas de tamaño RESPONSE_SIZE y sólo status==0
+        Espera un ACK válido, con timeout.
+        Filtra solo datagramas de tamaño RESPONSE_SIZE y solo status==0
         del peer esperado.
         """
         self.sock.settimeout(timeout)
         try:
             while True:
                 data, _ = self.sock.recvfrom(4096)
-                # 1) ignorar paquetes que no sean de tamaño ACK
+                # 1) Ignorar paquetes que no coincidan con el tamaño de ACK
                 if len(data) != RESPONSE_SIZE:
                     continue
-                # 2) intentar desempaquetar; si falla, ignorar
+                # 2) Intentar desempaquetar; si falla, ignorar
                 try:
                     resp = unpack_response(data)
                 except Exception:
                     continue
-                # 3) sólo aceptar status==0 y responder correcto
+                # 3) Solo aceptar status==0 y responder correcto
                 if resp['status'] == 0 and resp['responder'] == expected_from:
                     return
-                # 4) si viene de otro, seguimos esperando
+                # 4) Si es de otro peer o con status≠0, seguir esperando
         except socket.timeout:
             raise TimeoutError(f"No se recibió ACK de {expected_from!r}")
         finally:
@@ -84,14 +84,14 @@ class Messaging:
             try:
                 self.send(peer_id, message)
             except Exception:
-                # Si falla un peer, seguir con el siguiente
+                # Si falla con un peer, continuar con el siguiente
                 continue
 
     def start_listening(self):
-        """Pone a la escucha el socket para mensajes y archivos entrantes."""
-        threading.Thread(target=self._listen_loop, daemon=True).start()
+        """Arranca recv_loop en un hilo daemon."""
+        threading.Thread(target=self.recv_loop, daemon=True).start()
 
-    def _listen_loop(self):
+    def recv_loop(self):
         """Bucle infinito que procesa paquetes entrantes."""
         while True:
             data, addr = self.sock.recvfrom(4096)
@@ -105,7 +105,7 @@ class Messaging:
                 self.discovery.handle_echo(data, addr)
                 continue
 
-            # ACK handshake (reconocimiento del header o del body)
+            # Reconocimiento (ACK) del header o body
             self.sock.sendto(pack_response(0, self.user_id), addr)
             initial_body = data[HEADER_SIZE:]
             threading.Thread(
