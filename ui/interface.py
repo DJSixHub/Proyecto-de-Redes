@@ -53,7 +53,7 @@ if st.sidebar.button("🔍 Buscar Peers"):
 # 5️⃣ Cargar peers actuales y anteriores
 now = datetime.utcnow()
 OFFLINE_THRESHOLD = 20.0
-raw_peers = engine.discovery.get_peers()
+raw_peers = engine.discovery.get_peers()  # { uid_bytes: {'ip','last_seen'} }
 
 # Mapeo UID bytes → nombre limpio
 name_map = {
@@ -98,8 +98,9 @@ msg_global = st.sidebar.text_area("Escribe tu mensaje global aquí:")
 if st.sidebar.button("Enviar Mensaje Global"):
     if msg_global:
         try:
+            # 1) Enviar a todos
             engine.messaging.send_all(msg_global.encode('utf-8'))
-            # También lo agregamos localmente para que tú lo veas
+            # 2) Guardar localmente como global
             engine.history_store.append_message(
                 sender=user,
                 recipient="*global*",
@@ -116,13 +117,24 @@ if st.sidebar.button("Enviar Mensaje Global"):
 if peer_name:
     st.header(f"Chateando con: {peer_name}")
 
-    # Mostrar conversación histórica
-    conv = engine.history_store.get_conversation(peer_name)
+    # Reunir mensajes privados con este peer...
+    private_conv = engine.history_store.get_conversation(peer_name)
+    # ...y también todos los globales que tú enviaste
+    global_conv = engine.history_store.get_conversation("*global*")
+    # Combinar y ordenar por timestamp
+    conv = sorted(
+        private_conv + global_conv,
+        key=lambda e: e['timestamp']
+    )
+
+    # Mostrar con dos columnas
     for entry in conv:
-        author = "user" if entry['sender'] == user else entry['sender']
-        with st.chat_message(author):
+        is_me = (entry['sender'] == user)
+        left, right = st.columns([3, 3])
+        with (right if is_me else left):
+            prefix = "" if is_me else ""
             if entry['type'] == 'message':
-                st.write(entry['message'])
+                st.write(f"- {entry['message']}")
             else:
                 st.write(f"[Archivo] {entry['filename']}")
 
@@ -131,25 +143,32 @@ if peer_name:
     if msg:
         st.session_state["__msg_pending__"] = msg
 
+    # Si hay mensaje pendiente, enviarlo y mostrarlo
     if "__msg_pending__" in st.session_state:
+        msg_to_send = st.session_state["__msg_pending__"]
         try:
             raw_uid = reverse_map[peer_name]
+            # 1) Enviar
             engine.messaging.send(
                 raw_uid,
-                st.session_state["__msg_pending__"].encode('utf-8')
+                msg_to_send.encode('utf-8')
             )
-            # Guardar en historial local para que aparezca a la derecha
+            # 2) Guardar privado en historial
             engine.history_store.append_message(
                 sender=user,
                 recipient=peer_name,
-                message=st.session_state["__msg_pending__"],
+                message=msg_to_send,
                 timestamp=datetime.utcnow()
             )
-            # Limpiar y refrescar
-            del st.session_state["__msg_pending__"]
-            st.experimental_rerun()
+            # 3) Mostrar de inmediato en columna derecha
+            _, right = st.columns([3, 3])
+            with right:
+                st.write(f"- {msg_to_send}")
+
         except Exception as e:
             st.error(str(e))
+        finally:
+            del st.session_state["__msg_pending__"]
 
 else:
     st.write("Selecciona un peer en la barra lateral para comenzar a chatear.")

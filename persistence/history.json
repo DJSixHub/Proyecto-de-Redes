@@ -5,5 +5,75 @@
     "recipient": "papa",
     "message": "cardosa",
     "timestamp": "2025-05-25T17:13:01.570997"
+  },
+  {
+    "type": "message",
+    "sender": "aaa",
+    "recipient": "kimikito",
+    "message": "el yordi",
+    "timestamp": "2025-05-25T17:26:25.984229"
+  },
+  {
+    "type": "message",
+    "sender": "aaa",
+    "recipient": "kimikito",
+    "message": "pa rato",
+    "timestamp": "2025-05-25T17:26:35.280867"
+  },
+  {
+    "type": "message",
+    "sender": "kimikito",
+    "recipient": "aaa",
+    "message": "q bola",
+    "timestamp": "2025-05-25T17:26:39.767432"
+  },
+  {
+    "type": "message",
+    "sender": "kimikito",
+    "recipient": "aaa",
+    "message": "jonee",
+    "timestamp": "2025-05-25T17:26:44.431371"
+  },
+  {
+    "type": "message",
+    "sender": "aaa",
+    "recipient": "*global*",
+    "message": "tralalelo",
+    "timestamp": "2025-05-25T17:26:50.016158"
+  },
+  {
+    "type": "message",
+    "sender": "aaa",
+    "recipient": "*global*",
+    "message": "tralalelo tralala",
+    "timestamp": "2025-05-25T17:26:59.722916"
+  },
+  {
+    "type": "message",
+    "sender": "aaa",
+    "recipient": "kimikito",
+    "message": "yyyyyy",
+    "timestamp": "2025-05-25T17:27:11.600439"
+  },
+  {
+    "type": "message",
+    "sender": "aaa",
+    "recipient": "*global*",
+    "message": "tralalelo tralala",
+    "timestamp": "2025-05-25T17:31:33.884910"
+  },
+  {
+    "type": "message",
+    "sender": "aaa",
+    "recipient": "kimikito",
+    "message": "poquito",
+    "timestamp": "2025-05-25T17:31:41.852435"
+  },
+  {
+    "type": "message",
+    "sender": "ffff",
+    "recipient": "kimikito",
+    "message": "bfbfb",
+    "timestamp": "2025-05-25T17:35:00.602954"
   }
 ]
