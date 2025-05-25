@@ -1,24 +1,20 @@
-# persistence/peers_store.py
-
 import json
 import os
+from datetime import datetime
 
 class PeersStore:
     """
-    Guarda y carga el mapa de peers conocido:
-      { uid_bytes: {'ip': 'x.x.x.x', 'last_seen': timestamp}, ... }
-    en un fichero JSON.
+    Guarda y carga el mapa de peers conocidos,
+    y provee decode_map para convertir nombres a bytes.
     """
 
     def __init__(self, path='peers.json'):
-        # Puedes parametrizar la ruta si lo deseas
         self.path = path
 
     def load(self):
         """
-        Intenta cargar el JSON de peers. 
-        Si el fichero no existe, está vacío o es inválido,
-        devuelve un dict vacío en vez de lanzar excepción.
+        Carga peers.json y convierte last_seen (ISO string) a datetime.
+        Si falta o está corrupto, devuelve {}.
         """
         if not os.path.exists(self.path):
             return {}
@@ -26,20 +22,57 @@ class PeersStore:
         try:
             with open(self.path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            # Asegurarse que devuelve un dict
-            return data if isinstance(data, dict) else {}
+            if not isinstance(data, dict):
+                return {}
+
+            # Convertir last_seen de string a datetime
+            for info in data.values():
+                ls = info.get('last_seen')
+                if isinstance(ls, str):
+                    try:
+                        info['last_seen'] = datetime.fromisoformat(ls)
+                    except ValueError:
+                        info['last_seen'] = datetime.utcnow()
+            return data
+
         except (json.JSONDecodeError, ValueError):
-            # Fichero vacío o JSON malformado
             return {}
 
     def save(self, peers_dict):
         """
-        Serializa el dict de peers a JSON, creando/reescribiendo el fichero.
+        Serializa peers_dict (keys: uid_bytes) a JSON con claves string (sin padding).
         """
-        # Asegurarse de la carpeta existe si usas rutas con subdirectorios
+        # Prepara un dict apto para JSON
+        json_ready = {}
+        for uid_bytes, info in peers_dict.items():
+            # Convertir bytes padded a nombre limpio
+            name = uid_bytes.rstrip(b'\x00').decode('utf-8')
+            json_ready[name] = {
+                'ip': info['ip'],
+                # convertir datetime a ISO si es necesario
+                'last_seen': (
+                    info['last_seen'].isoformat()
+                    if hasattr(info['last_seen'], 'isoformat')
+                    else info['last_seen']
+                )
+            }
+
         directory = os.path.dirname(self.path)
         if directory and not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
 
         with open(self.path, 'w', encoding='utf-8') as f:
-            json.dump(peers_dict, f, ensure_ascii=False, indent=2)
+            json.dump(json_ready, f, ensure_ascii=False, indent=2)
+
+    def decode_map(self, raw_peers):
+        """
+        Dado el dict crudo de load() cuyas claves son nombres (str),
+        devuelve { nombre_str: uid_bytes_padded_a_20 }.
+        """
+        name_map = {}
+        for name_str in raw_peers.keys():
+            uid_bytes = name_str.encode('utf-8')
+            trimmed = uid_bytes[:20]              # recortar si >20
+            padded  = trimmed.ljust(20, b'\x00')  # pad bytes a 20
+            name_map[name_str] = padded
+        return name_map

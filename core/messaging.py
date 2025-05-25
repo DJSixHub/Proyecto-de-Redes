@@ -87,6 +87,13 @@ class Messaging:
             except Exception:
                 pass
 
+    def send_all(self, message: bytes):
+        """
+        Alias para compatibilidad con la interfaz:
+        envía mensaje global a todos los peers.
+        """
+        return self.broadcast(message)
+
     def start_listening(self):
         """Arranca recv_loop en hilo daemon."""
         threading.Thread(target=self.recv_loop, daemon=True).start()

@@ -1,13 +1,11 @@
-# ui/interface.py
-
 import os
 import sys
 import streamlit as st
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- Ajuste de sys.path para importar core/ y persistence/ ---
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# --- Ajustar path para importar core/ y persistence/ ---
+SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -31,42 +29,23 @@ user = st.session_state['user_id']
 
 # 2️⃣ Inicializar Engine
 if 'engine' not in st.session_state:
-    engine = Engine(user_id=user)
-    engine.start()
-    st.session_state['engine'] = engine
-else:
-    engine = st.session_state['engine']
+    st.session_state['engine'] = Engine(user_id=user)
+engine = st.session_state['engine']
 
-# 3️⃣ Refrescar cada 3 segundos (para recibir mensajes automáticamente)
-st_autorefresh(interval=3000, key="auto_refresh")
+# 3️⃣ Autorefresh para actualizar peers y chat
+st_autorefresh(interval=2000, key="refresh")
 
-# 4️⃣ Sidebar: Usuario, IP y acciones
-st.sidebar.title(f"Usuario: {user}")
-st.sidebar.markdown(
-    f"<p style='font-size:12px; color:gray;'>IP: {engine.discovery.local_ip}</p>",
-    unsafe_allow_html=True
-)
-if st.sidebar.button("🔍 Buscar Peers"):
-    engine.discovery.force_discover()
-    st.sidebar.success("Búsqueda de peers forzada")
+# 4️⃣ Cargar y decodificar peers
+raw_peers = engine.peers_store.load()          # { nombre_str: {'ip','last_seen'} }
+name_map  = engine.peers_store.decode_map(raw_peers)  # { nombre_str: uid_bytes }
 
-# 5️⃣ Cargar peers actuales y anteriores
+# 5️⃣ Separar peers actuales / anteriores
 now = datetime.utcnow()
-OFFLINE_THRESHOLD = 20.0
-raw_peers = engine.discovery.get_peers()
-
-name_map = {
-    uid: uid.rstrip(b'\x00').decode('utf-8', errors='ignore')
-    for uid in raw_peers
-}
-reverse_map = {v: k for k, v in name_map.items()}
-
-current_peers = []
-previous_peers = []
-
-for uid, info in raw_peers.items():
-    name = name_map[uid]
-    age = (now - info['last_seen']).total_seconds()
+OFFLINE_THRESHOLD = 10  # segundos
+current_peers, previous_peers = [], []
+for name, info in raw_peers.items():
+    last = info['last_seen']
+    age  = (now - last).total_seconds()
     if age < OFFLINE_THRESHOLD:
         current_peers.append(name)
     else:
@@ -123,10 +102,21 @@ if peer_name:
     if msg:
         st.session_state["__msg_pending__"] = msg
 
+    # Enviar mensaje pendiente
     if "__msg_pending__" in st.session_state:
         try:
-            raw_uid = reverse_map[peer_name]
-            engine.messaging.send(raw_uid, st.session_state["__msg_pending__"].encode('utf-8'))
+            uid_bytes = name_map[peer_name]
+            engine.messaging.send(
+                uid_bytes,
+                st.session_state["__msg_pending__"].encode('utf-8')
+            )
+            # Registrar también localmente para verlo en la derecha
+            engine.history_store.append_message(
+                sender=user,
+                recipient=peer_name,
+                message=st.session_state["__msg_pending__"],
+                timestamp=datetime.utcnow()
+            )
             del st.session_state["__msg_pending__"]
         except Exception as e:
             st.error(str(e))
