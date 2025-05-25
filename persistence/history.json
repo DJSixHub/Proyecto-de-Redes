@@ -33,5 +33,12 @@
     "recipient": "DJSix\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
     "message": "nbv",
     "timestamp": "2025-05-22T12:29:56.806390"
+  },
+  {
+    "type": "message",
+    "sender": "Felipe",
+    "recipient": "aaa",
+    "message": "aaa",
+    "timestamp": "2025-05-25T16:11:45.029568"
   }
 ]
