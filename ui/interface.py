@@ -37,7 +37,7 @@ if 'engine' not in st.session_state:
 else:
     engine = st.session_state['engine']
 
-# 3️⃣ Refrescar cada 3 segundos (para recibir mensajes automáticamente)
+# 3️⃣ Refrescar cada 3 segundos
 st_autorefresh(interval=3000, key="auto_refresh")
 
 # 4️⃣ Sidebar: Usuario, IP y acciones
@@ -50,30 +50,38 @@ if st.sidebar.button("🔍 Buscar Peers"):
     engine.discovery.force_discover()
     st.sidebar.success("Búsqueda de peers forzada")
 
-# 5️⃣ Cargar peers actuales y anteriores
+# 5️⃣ Construir lista de peers y mappings
 now = datetime.utcnow()
 OFFLINE_THRESHOLD = 20.0
 
-# raw_peers: { uid_bytes: {'ip','last_seen'} }
-raw_peers = engine.discovery.get_peers()
+raw_peers = engine.discovery.get_peers()  # keys uid_bytes or uid_str → {'ip','last_seen'}
 
-# name_map: uid_bytes -> nombre_str limpio
-name_map = {
-    uid: uid.rstrip(b'\x00').decode('utf-8', errors='ignore')
-    for uid in raw_peers
-}
-# reverse_map: nombre_str -> uid_bytes
-reverse_map = {name: uid for uid, name in name_map.items()}
-
-current_peers = []
-previous_peers = []
-for uid, info in raw_peers.items():
-    name = name_map[uid]
-    age = (now - info['last_seen']).total_seconds()
-    if age < OFFLINE_THRESHOLD:
-        current_peers.append(name)
+# Unificar: lista de tuples (name_str, uid_bytes, info)
+peers = []
+for uid_key, info in raw_peers.items():
+    if isinstance(uid_key, bytes):
+        trimmed = uid_key.rstrip(b'\x00')
+        name_str = trimmed.decode('utf-8', errors='ignore')
+        uid_bytes = trimmed.ljust(20, b'\x00')
     else:
-        previous_peers.append(name)
+        name_str = uid_key
+        b = name_str.encode('utf-8')
+        trimmed = b[:20]
+        uid_bytes = trimmed.ljust(20, b'\x00')
+    peers.append((name_str, uid_bytes, info))
+
+# reverse_map: name_str → uid_bytes
+reverse_map = {name: uid for name, uid, _ in peers}
+
+# Separar actuales / anteriores por last_seen
+current_peers = [
+    name for name, _, info in peers
+    if (now - info['last_seen']).total_seconds() < OFFLINE_THRESHOLD
+]
+previous_peers = [
+    name for name, _, info in peers
+    if (now - info['last_seen']).total_seconds() >= OFFLINE_THRESHOLD
+]
 
 # 6️⃣ Selección de peer
 st.sidebar.subheader("Peers Conectados")
@@ -122,7 +130,6 @@ if peer_name:
             data = uploaded.read()
             uid_bytes = reverse_map[peer_name]
             engine.messaging.send_file(uid_bytes, data, uploaded.name)
-            # append_file sólo necesita sender, recipient, filename, timestamp
             engine.history_store.append_file(
                 sender=user,
                 recipient=peer_name,
@@ -139,7 +146,7 @@ else:
 if peer_name:
     st.header(f"Chateando con: {peer_name}")
 
-    # 9.1) Mensajes privados + globales (como tuyos)
+    # 9.1) Combinar privados + globales
     private = engine.history_store.get_conversation(peer_name)
     global_msgs = engine.history_store.get_conversation("*global*")
     conv = sorted(private + global_msgs, key=lambda e: e['timestamp'])
@@ -161,7 +168,7 @@ if peer_name:
                 else:
                     st.write(f"[Archivo] {e['filename']}")
 
-    # 9.3) Enviar nuevo mensaje de texto
+    # 9.3) Enviar mensaje de texto
     txt = st.chat_input("Escribe tu mensaje...")
     if txt:
         st.session_state["__msg_pending__"] = txt
