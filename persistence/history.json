@@ -131,5 +131,54 @@
     "recipient": "Tralalelo Tralala",
     "message": "nueva guinea",
     "timestamp": "2025-05-25T17:40:12.636307"
+  },
+  {
+    "type": "message",
+    "sender": "Shein",
+    "recipient": "Amanda",
+    "message": "y mis libritas",
+    "timestamp": "2025-05-25T17:53:56.395529"
+  },
+  {
+    "type": "message",
+    "sender": "Amanda",
+    "recipient": "Shein",
+    "message": "no no c",
+    "timestamp": "2025-05-25T17:54:03.426314"
+  },
+  {
+    "type": "message",
+    "sender": "Shein",
+    "recipient": "Amanda",
+    "message": "ah si",
+    "timestamp": "2025-05-25T17:54:07.426473"
+  },
+  {
+    "type": "message",
+    "sender": "Shein",
+    "recipient": "Amanda",
+    "message": "tengo a leo",
+    "timestamp": "2025-05-25T17:54:10.380252"
+  },
+  {
+    "type": "file",
+    "sender": "Shein",
+    "recipient": "Amanda",
+    "filename": "messaging.py",
+    "timestamp": "2025-05-25T17:54:27.884023"
+  },
+  {
+    "type": "message",
+    "sender": "Shein",
+    "recipient": "*global*",
+    "message": "frfrfr",
+    "timestamp": "2025-05-25T17:55:12.411739"
+  },
+  {
+    "type": "file",
+    "sender": "sssss",
+    "recipient": "Amanda",
+    "filename": "messaging.py",
+    "timestamp": "2025-05-25T17:58:01.332843"
   }
 ]

@@ -19,7 +19,7 @@ from core.protocol import (
 class Messaging:
     """
     Comunicación con protocolo LCP (HEADER → ACK → BODY → ACK).
-    Usa un solo reader (recv_loop) y cola de ACKs para coordinar send()/send_file().
+    Soporta envío de texto y archivos.
     """
 
     def __init__(self, user_id: bytes, discovery, history_store):
@@ -32,13 +32,13 @@ class Messaging:
         self.sock.setblocking(True)
         self.sock.settimeout(None)
 
-        # Para coordinar ACKs
+        # Para coordinar ACKs que esperan send()/send_file()
         self._acks = {}             # responder_uid -> threading.Event
         self._acks_lock = threading.Lock()
 
     def _send_and_wait(self, data: bytes, recipient: bytes, timeout: float = 2.0):
         """
-        Envia `data` a `recipient` y espera el ACK (RESPONSE_SIZE + status=0).
+        Envía `data` a `recipient` y espera el ACK correspondiente.
         """
         info = self.discovery.get_peers().get(recipient)
         if not info:
@@ -51,19 +51,19 @@ class Messaging:
             self._acks[key] = ev
 
         self.sock.sendto(data, dest)
-        ok = ev.wait(timeout)
+        received = ev.wait(timeout)
 
         with self._acks_lock:
             self._acks.pop(key, None)
 
-        if not ok:
+        if not received:
             raise TimeoutError(f"No se recibió ACK de {recipient!r}")
 
     def send(self, recipient: bytes, message: bytes, timeout: float = 2.0):
         """
         Envía un mensaje de texto:
-          1) HEADER(op_code=1) → ACK
-          2) BODY (message)   → ACK
+          1) HEADER(op_code=1, body_len) → ACK
+          2) BODY(message)               → ACK
         """
         # 1) Header
         header = pack_header(
@@ -81,10 +81,10 @@ class Messaging:
     def send_file(self, recipient: bytes, file_bytes: bytes, filename: str, timeout: float = 5.0):
         """
         Envía un archivo:
-          1) HEADER(op_code=2) → ACK
-          2) BODY (2B name_len + filename + file_bytes) → ACK
+          1) HEADER(op_code=2, body_len) → ACK
+          2) BODY(2B name_len + filename + file_bytes) → ACK
         """
-        # preparar body
+        # Construir el body con longitud del nombre + contenido
         name_b = filename.encode('utf-8')
         if len(name_b) > 0xFFFF:
             raise ValueError("Nombre de archivo demasiado largo")
@@ -104,13 +104,13 @@ class Messaging:
         self._send_and_wait(body, recipient, timeout)
 
     def broadcast(self, message: bytes):
-        """Envía un mensaje de texto a todos los peers."""
+        """Envía un mensaje de texto a todos los peers (excepto BROADCAST_UID)."""
         for peer_id in self.discovery.get_peers():
             if peer_id == BROADCAST_UID:
                 continue
             try:
                 self.send(peer_id, message)
-            except:
+            except Exception:
                 pass
 
     def send_all(self, message: bytes):
@@ -128,7 +128,7 @@ class Messaging:
             if len(data) == RESPONSE_SIZE:
                 try:
                     resp = unpack_response(data)
-                except:
+                except Exception:
                     continue
                 if resp['status'] == 0:
                     r = resp['responder'].rstrip(b'\x00')
@@ -141,7 +141,7 @@ class Messaging:
                 self.discovery.handle_response(data, addr)
                 continue
 
-            # 2) ¿Es una cabecera de mensaje o discovery?
+            # 2) Mensaje o archivo (cabecera)
             if len(data) < HEADER_SIZE:
                 continue
 
@@ -152,17 +152,20 @@ class Messaging:
                 self.discovery.handle_echo(data, addr)
                 continue
 
-            # Mensaje/archivo dirigido a mí
+            # Sólo procesar si es para mí
             if hdr['op_code'] in (1, 2) and hdr['user_to'].rstrip(b'\x00') == self.user_id.rstrip(b'\x00'):
                 # ACK cabecera
                 self.sock.sendto(pack_response(0, self.user_id), addr)
-                # leer cuerpo
+
+                # Recibir cuerpo completo
                 body_len = hdr['body_len']
                 chunk, _ = self.sock.recvfrom(max(body_len, 4096))
                 body = chunk[:body_len]
+
                 # ACK cuerpo
                 self.sock.sendto(pack_response(0, self.user_id), addr)
-                # despachar
+
+                # Despachar
                 threading.Thread(
                     target=self._handle_message_or_file,
                     args=(hdr, body),
@@ -174,6 +177,7 @@ class Messaging:
         me   = self.user_id.rstrip(b'\x00').decode('utf-8')
 
         if hdr['op_code'] == 1:
+            # Texto
             text = body.decode('utf-8', errors='ignore').rstrip('\x00')
             self.history_store.append_message(
                 sender=peer,
@@ -181,18 +185,21 @@ class Messaging:
                 message=text,
                 timestamp=datetime.utcnow()
             )
-        else:  # archivo
+        else:
+            # Archivo: guardar en carpeta "Descargas" en la raíz del proyecto
             name_len = int.from_bytes(body[:2], 'big')
             filename = body[2:2 + name_len].decode('utf-8', errors='ignore')
             file_data = body[2 + name_len:]
-            os.makedirs('received_files', exist_ok=True)
-            path = os.path.join('received_files', filename)
+
+            downloads_dir = os.path.join(os.getcwd(), "Descargas")
+            os.makedirs(downloads_dir, exist_ok=True)
+            path = os.path.join(downloads_dir, filename)
             with open(path, 'wb') as f:
                 f.write(file_data)
+
             self.history_store.append_file(
                 sender=peer,
                 recipient=me,
                 filename=filename,
-                path=path,
                 timestamp=datetime.utcnow()
             )
