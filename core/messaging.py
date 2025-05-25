@@ -19,7 +19,8 @@ from core.protocol import (
 class Messaging:
     """
     Comunicación con protocolo LCP (HEADER → ACK → BODY → ACK).
-    Soporta envío de texto y archivos.
+    Soporta envío de texto y archivos, y guarda los archivos recibidos
+    en ./Descargas en la raíz del proyecto.
     """
 
     def __init__(self, user_id: bytes, discovery, history_store):
@@ -65,7 +66,6 @@ class Messaging:
           1) HEADER(op_code=1, body_len) → ACK
           2) BODY(message)               → ACK
         """
-        # 1) Header
         header = pack_header(
             user_from=self.user_id,
             user_to=recipient,
@@ -74,8 +74,6 @@ class Messaging:
             body_len=len(message)
         )
         self._send_and_wait(header, recipient, timeout)
-
-        # 2) Body
         self._send_and_wait(message, recipient, timeout)
 
     def send_file(self, recipient: bytes, file_bytes: bytes, filename: str, timeout: float = 5.0):
@@ -84,13 +82,11 @@ class Messaging:
           1) HEADER(op_code=2, body_len) → ACK
           2) BODY(2B name_len + filename + file_bytes) → ACK
         """
-        # Construir el body con longitud del nombre + contenido
         name_b = filename.encode('utf-8')
         if len(name_b) > 0xFFFF:
             raise ValueError("Nombre de archivo demasiado largo")
         body = len(name_b).to_bytes(2, 'big') + name_b + file_bytes
 
-        # 1) Header
         header = pack_header(
             user_from=self.user_id,
             user_to=recipient,
@@ -99,8 +95,6 @@ class Messaging:
             body_len=len(body)
         )
         self._send_and_wait(header, recipient, timeout)
-
-        # 2) Body
         self._send_and_wait(body, recipient, timeout)
 
     def broadcast(self, message: bytes):
@@ -110,7 +104,7 @@ class Messaging:
                 continue
             try:
                 self.send(peer_id, message)
-            except Exception:
+            except:
                 pass
 
     def send_all(self, message: bytes):
@@ -128,7 +122,7 @@ class Messaging:
             if len(data) == RESPONSE_SIZE:
                 try:
                     resp = unpack_response(data)
-                except Exception:
+                except:
                     continue
                 if resp['status'] == 0:
                     r = resp['responder'].rstrip(b'\x00')
@@ -137,7 +131,6 @@ class Messaging:
                     if ev:
                         ev.set()
                         continue
-                # si no era nuestro ACK, lo pasa a discovery
                 self.discovery.handle_response(data, addr)
                 continue
 
@@ -186,7 +179,7 @@ class Messaging:
                 timestamp=datetime.utcnow()
             )
         else:
-            # Archivo: guardar en carpeta "Descargas" en la raíz del proyecto
+            # Archivo: guardar en carpeta "Descargas"
             name_len = int.from_bytes(body[:2], 'big')
             filename = body[2:2 + name_len].decode('utf-8', errors='ignore')
             file_data = body[2 + name_len:]
