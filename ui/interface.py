@@ -37,10 +37,10 @@ if 'engine' not in st.session_state:
 else:
     engine = st.session_state['engine']
 
-# 3️⃣ Refrescar cada 3 segundos
+# 3️⃣ Refrescar cada 3 segundos (para recibir mensajes automáticamente)
 st_autorefresh(interval=3000, key="auto_refresh")
 
-# 4️⃣ Sidebar
+# 4️⃣ Sidebar: Usuario, IP y acciones
 st.sidebar.title(f"Usuario: {user}")
 st.sidebar.markdown(
     f"<p style='font-size:12px; color:gray;'>IP: {engine.discovery.local_ip}</p>",
@@ -50,33 +50,44 @@ if st.sidebar.button("🔍 Buscar Peers"):
     engine.discovery.force_discover()
     st.sidebar.success("Búsqueda de peers forzada")
 
-# 5️⃣ Peers
+# 5️⃣ Cargar peers actuales y anteriores
 now = datetime.utcnow()
 OFFLINE_THRESHOLD = 20.0
+# raw_peers: dict cuyos keys son nombres (str) y values {'ip','last_seen'}
 raw_peers = engine.discovery.get_peers()
-name_map = {
-    uid: uid.rstrip(b'\x00').decode('utf-8', errors='ignore')
-    for uid in raw_peers
-}
-reverse_map = {v: k for k, v in name_map.items()}
 
+# Creamos reverse_map: nombre_str -> uid_bytes_padded
+reverse_map = {}
+for name in raw_peers:
+    b = name.encode('utf-8')
+    trimmed = b[:20]
+    padded = trimmed.ljust(20, b'\x00')
+    reverse_map[name] = padded
+
+# Dividir peers por online/offline
 current_peers, previous_peers = [], []
-for uid, info in raw_peers.items():
-    name = name_map[uid]
+for name, info in raw_peers.items():
     age = (now - info['last_seen']).total_seconds()
     (current_peers if age < OFFLINE_THRESHOLD else previous_peers).append(name)
 
 # 6️⃣ Selección de peer
 st.sidebar.subheader("Peers Conectados")
-sel_cur = st.sidebar.selectbox("Selecciona un peer actual",
-                               sorted(current_peers) or ["Ninguno"])
-if sel_cur == "Ninguno": sel_cur = None
-st.sidebar.subheader("Peers Anteriores")
-sel_prev = st.sidebar.selectbox("Selecciona un peer anterior",
-                                sorted(previous_peers) or ["Ninguno"])
-if sel_prev == "Ninguno": sel_prev = None
+selected_current = st.sidebar.selectbox(
+    "Selecciona un peer actual",
+    sorted(current_peers) if current_peers else ["Ninguno"]
+)
+if selected_current == "Ninguno":
+    selected_current = None
 
-peer_name = sel_cur or sel_prev
+st.sidebar.subheader("Peers Anteriores")
+selected_previous = st.sidebar.selectbox(
+    "Selecciona un peer anterior",
+    sorted(previous_peers) if previous_peers else ["Ninguno"]
+)
+if selected_previous == "Ninguno":
+    selected_previous = None
+
+peer_name = selected_current or selected_previous
 
 # 7️⃣ Mensaje Global
 st.sidebar.subheader("Mensaje Global")
@@ -95,18 +106,40 @@ if st.sidebar.button("Enviar Mensaje Global"):
         except Exception as e:
             st.sidebar.error(f"Error: {e}")
     else:
-        st.sidebar.error("Escribe algo antes de enviar")
+        st.sidebar.error("Por favor escribe algo antes de enviar")
 
-# 8️⃣ Chat con peer
+# 8️⃣ Envío de archivos (Sidebar)
+st.sidebar.subheader("Enviar Archivo")
+if peer_name:
+    uploaded = st.sidebar.file_uploader("Selecciona un archivo", key="file_uploader")
+    if uploaded is not None and st.sidebar.button("Enviar Archivo"):
+        try:
+            data = uploaded.read()
+            uid_bytes = reverse_map[peer_name]
+            engine.messaging.send_file(uid_bytes, data, uploaded.name)
+            # append_file sólo necesita sender, recipient, filename, timestamp
+            engine.history_store.append_file(
+                sender=user,
+                recipient=peer_name,
+                filename=uploaded.name,
+                timestamp=datetime.utcnow()
+            )
+            st.sidebar.success(f"Archivo '{uploaded.name}' enviado")
+        except Exception as e:
+            st.sidebar.error(str(e))
+else:
+    st.sidebar.info("Selecciona un peer para enviar archivos")
+
+# 9️⃣ Área principal de chat
 if peer_name:
     st.header(f"Chateando con: {peer_name}")
 
-    # 8.1) Construir conversación (privada + global como privados tuyos)
+    # 9.1) Mensajes privados + globales (como tuyos)
     private = engine.history_store.get_conversation(peer_name)
     global_msgs = engine.history_store.get_conversation("*global*")
     conv = sorted(private + global_msgs, key=lambda e: e['timestamp'])
 
-    # 8.2) Mostrar con st.chat_message en dos columnas
+    # 9.2) Mostrar con st.chat_message en dos columnas
     for e in conv:
         is_me = (e['sender'] == user)
         left, right = st.columns([3, 3])
@@ -123,7 +156,7 @@ if peer_name:
                 else:
                     st.write(f"[Archivo] {e['filename']}")
 
-    # 8.3) Enviar texto
+    # 9.3) Enviar nuevo mensaje de texto
     txt = st.chat_input("Escribe tu mensaje...")
     if txt:
         st.session_state["__msg_pending__"] = txt
@@ -131,38 +164,21 @@ if peer_name:
     if "__msg_pending__" in st.session_state:
         m = st.session_state["__msg_pending__"]
         try:
-            uid = reverse_map[peer_name]
-            engine.messaging.send(uid, m.encode('utf-8'))
+            uid_bytes = reverse_map[peer_name]
+            engine.messaging.send(uid_bytes, m.encode('utf-8'))
             engine.history_store.append_message(
-                sender=user, recipient=peer_name,
-                message=m, timestamp=datetime.utcnow()
+                sender=user,
+                recipient=peer_name,
+                message=m,
+                timestamp=datetime.utcnow()
             )
-            left, right = st.columns([3,3])
+            left, right = st.columns([3, 3])
             with right, st.chat_message("user"):
                 st.write(m)
         except Exception as e:
             st.error(str(e))
         finally:
             del st.session_state["__msg_pending__"]
-
-    # 8.4) Enviar archivo
-    uploaded = st.file_uploader("Selecciona un archivo para enviar", key="file_uploader")
-    if uploaded is not None:
-        if st.button("Enviar Archivo"):
-            try:
-                data = uploaded.read()
-                uid = reverse_map[peer_name]
-                engine.messaging.send_file(uid, data, uploaded.name)
-                engine.history_store.append_file(
-                    sender=user, recipient=peer_name,
-                    filename=uploaded.name, path=uploaded.name,
-                    timestamp=datetime.utcnow()
-                )
-                left, right = st.columns([3,3])
-                with right, st.chat_message("user"):
-                    st.write(f"[Archivo] {uploaded.name}")
-            except Exception as e:
-                st.error(str(e))
 
 else:
     st.write("Selecciona un peer en la barra lateral para comenzar a chatear.")
