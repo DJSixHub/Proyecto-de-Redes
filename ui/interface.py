@@ -53,22 +53,27 @@ if st.sidebar.button("🔍 Buscar Peers"):
 # 5️⃣ Cargar peers actuales y anteriores
 now = datetime.utcnow()
 OFFLINE_THRESHOLD = 20.0
-# raw_peers: dict cuyos keys son nombres (str) y values {'ip','last_seen'}
+
+# raw_peers: { uid_bytes: {'ip','last_seen'} }
 raw_peers = engine.discovery.get_peers()
 
-# Creamos reverse_map: nombre_str -> uid_bytes_padded
-reverse_map = {}
-for name in raw_peers:
-    b = name.encode('utf-8')
-    trimmed = b[:20]
-    padded = trimmed.ljust(20, b'\x00')
-    reverse_map[name] = padded
+# name_map: uid_bytes -> nombre_str limpio
+name_map = {
+    uid: uid.rstrip(b'\x00').decode('utf-8', errors='ignore')
+    for uid in raw_peers
+}
+# reverse_map: nombre_str -> uid_bytes
+reverse_map = {name: uid for uid, name in name_map.items()}
 
-# Dividir peers por online/offline
-current_peers, previous_peers = [], []
-for name, info in raw_peers.items():
+current_peers = []
+previous_peers = []
+for uid, info in raw_peers.items():
+    name = name_map[uid]
     age = (now - info['last_seen']).total_seconds()
-    (current_peers if age < OFFLINE_THRESHOLD else previous_peers).append(name)
+    if age < OFFLINE_THRESHOLD:
+        current_peers.append(name)
+    else:
+        previous_peers.append(name)
 
 # 6️⃣ Selección de peer
 st.sidebar.subheader("Peers Conectados")
