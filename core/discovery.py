@@ -30,20 +30,20 @@ class Discovery:
                  broadcast_interval: float = 1.0,
                  peers_store=None):
         # UID raw (sin padding) y padded (20 bytes)
-        self.raw_id = user_id.rstrip(b'\x00')
-        self.user_id = self.raw_id.ljust(20, b'\x00')
+        self.raw_id   = user_id.rstrip(b'\x00')
+        self.user_id  = self.raw_id.ljust(20, b'\x00')
         self.broadcast_interval = broadcast_interval
-        self.peers_store = peers_store
+        self.peers_store       = peers_store
 
         # Determinar IP principal y todas las IPs locales
-        hostname = socket.gethostname()
+        hostname  = socket.gethostname()
         all_addrs = socket.gethostbyname_ex(hostname)[2]
         # Elegimos la primera que no sea loopback como `local_ip`
-        self.local_ip = next((ip for ip in all_addrs if not ip.startswith("127.")), all_addrs[0])
+        self.local_ip  = next((ip for ip in all_addrs if not ip.startswith("127.")), all_addrs[0])
         # Conjunto de todas las IPs de la máquina, incluyendo loopback
         self.local_ips = set(all_addrs) | {"127.0.0.1"}
 
-        # Mapa interno: raw_peer_id → {'ip', 'last_seen'}
+        # Mapa interno: padded_peer_id (20 bytes) → {'ip', 'last_seen'}
         self.peers = {}
 
         # Socket UDP en todas las interfaces
@@ -89,9 +89,9 @@ class Discovery:
                 age = (now - info['last_seen']).total_seconds()
                 status = 'connected' if age < OFFLINE_THRESHOLD else 'disconnected'
                 to_save[uid] = {
-                    'ip': ip,
-                    'last_seen': info['last_seen'],
-                    'status': status
+                    'ip':         ip,
+                    'last_seen':  info['last_seen'],
+                    'status':     status
                 }
             self.peers_store.save(to_save)
 
@@ -102,11 +102,13 @@ class Discovery:
         - Responde Echo-Reply.
         - Registra o actualiza el peer, eliminando antiguos UID de la misma IP.
         """
-        hdr = unpack_header(data[:HEADER_SIZE])
-        raw_peer = hdr['user_from'].rstrip(b'\x00')
-        peer_ip = addr[0]
+        hdr      = unpack_header(data[:HEADER_SIZE])
+        raw_id   = hdr['user_from']                    # bytes sin padding
+        raw_peer = raw_id.ljust(20, b'\x00')           # padded 20 bytes
+        peer_ip  = addr[0]
 
-        if peer_ip in self.local_ips or raw_peer == self.raw_id:
+        # Para evitar descubrirnos a nosotros mismos comparamos el trimmed
+        if peer_ip in self.local_ips or raw_id == self.raw_id:
             return
 
         # Responder
@@ -119,7 +121,7 @@ class Discovery:
 
         # Registrar/actualizar
         self.peers[raw_peer] = {
-            'ip': peer_ip,
+            'ip':        peer_ip,
             'last_seen': datetime.utcnow()
         }
 
@@ -128,19 +130,23 @@ class Discovery:
         Procesa un Echo-Reply (RESPONSE_FMT):
         - Igual que handle_echo, pero desempaquetando RESPONSE_FMT.
         """
-        resp = unpack_response(data[:RESPONSE_SIZE])
-        raw_peer = resp['responder'].rstrip(b'\x00')
-        peer_ip = addr[0]
+        resp     = unpack_response(data[:RESPONSE_SIZE])
+        resp_id  = resp['responder']                   # bytes sin padding
+        raw_peer = resp_id.ljust(20, b'\x00')          # padded 20 bytes
+        peer_ip  = addr[0]
 
-        if resp['status'] != 0 or peer_ip in self.local_ips or raw_peer == self.raw_id:
+        # Comparamos trimmed para saltarnos nuestro propio id
+        if resp['status'] != 0 or peer_ip in self.local_ips or resp_id == self.raw_id:
             return
 
+        # Eliminar UID previos para esta IP
         for uid in list(self.peers):
             if self.peers[uid]['ip'] == peer_ip and uid != raw_peer:
                 del self.peers[uid]
 
+        # Registrar/actualizar
         self.peers[raw_peer] = {
-            'ip': peer_ip,
+            'ip':        peer_ip,
             'last_seen': datetime.utcnow()
         }
 
