@@ -1,4 +1,7 @@
-# ui/interface.py
+# Este archivo implementa la interfaz gráfica del sistema de chat usando Streamlit.
+# El flujo de trabajo consiste en manejar la interacción con el usuario, mostrar mensajes
+# y archivos, y coordinar las acciones con el motor principal del sistema. La interfaz
+# se actualiza automáticamente y mantiene el estado de la sesión.
 
 import os
 import sys
@@ -6,13 +9,8 @@ import streamlit as st
 from datetime import datetime, UTC
 from streamlit_autorefresh import st_autorefresh
 
-# Este archivo implementa la interfaz gráfica del chat utilizando Streamlit. El flujo de la aplicación
-# comienza con la autenticación del usuario mediante un ID, luego inicializa el motor de comunicación
-# que maneja las conexiones P2P. La interfaz se actualiza automáticamente cada 3 segundos y muestra
-# una barra lateral con información del usuario y controles, mientras que el área principal muestra
-# las conversaciones. El sistema permite enviar mensajes privados, mensajes globales y archivos,
-# manteniendo un registro del historial de comunicaciones y el estado de los peers conectados.
-
+# Configuración del path para importaciones
+# Asegura acceso a los módulos core y persistence
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
@@ -20,13 +18,18 @@ if PROJECT_ROOT not in sys.path:
 
 from core.engine import Engine
 
-# Constantes
-OFFLINE_THRESHOLD = 20.0  # segundos
-MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB máximo para archivos
-REFRESH_INTERVAL = 3000  # ms
+# Configuración de constantes del sistema
+# Estos valores son críticos para:
+# 1. Determinar el estado de conexión de peers
+# 2. Limitar el tamaño de archivos
+# 3. Mantener la interfaz actualizada
+OFFLINE_THRESHOLD = 20.0  # Tiempo máximo sin respuesta (segundos)
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # Límite de tamaño de archivo (100 MB)
+REFRESH_INTERVAL = 3000  # Intervalo de actualización de UI (ms)
 
-# Maneja la autenticación del usuario solicitando un ID único que se almacenará
-# en la sesión. Es necesario para identificar al usuario en la red P2P.
+# Sistema de autenticación
+# Maneja el ingreso del identificador de usuario
+# y mantiene la sesión activa
 if 'user_id' not in st.session_state or not st.session_state['user_id']:
     st.title("LCP Chat Interface")
     with st.form("login_form"):
@@ -41,8 +44,11 @@ if 'user_id' not in st.session_state or not st.session_state['user_id']:
 
 user = st.session_state['user_id']
 
-# Inicializa el motor de comunicación P2P si no existe en la sesión actual.
-# Este componente es crucial para manejar la comunicación entre peers.
+# Inicialización del motor de comunicación
+# Esta sección es crítica porque:
+# 1. Establece la conexión con la red
+# 2. Configura los componentes del sistema
+# 3. Maneja errores de inicialización
 if 'engine' not in st.session_state:
     try:
         engine = Engine(user_id=user)
@@ -54,34 +60,47 @@ if 'engine' not in st.session_state:
 else:
     engine = st.session_state['engine']
 
-# Configura el refresco automático de la interfaz para mantener
-# la información actualizada sin intervención del usuario
+# Configuración de actualización automática
+# Mantiene la interfaz sincronizada con el estado del sistema
 st_autorefresh(interval=REFRESH_INTERVAL, key="auto_refresh")
 
-# Configura la barra lateral con información del usuario y controles de conexión.
-# Muestra el estado de la conexión TCP y permite buscar nuevos peers.
+# Panel lateral de control
+# Esta sección es importante porque:
+# 1. Muestra información del usuario
+# 2. Indica el estado de la conexión
+# 3. Permite acciones de sistema
 st.sidebar.title(f"Usuario: {user}")
 st.sidebar.markdown(
     f"<p style='font-size:12px; color:gray;'>IP: {engine.discovery.local_ip}</p>",
     unsafe_allow_html=True
 )
 
-# Estado de la conexión TCP
+# Monitoreo del estado TCP
+# Indica si el sistema puede recibir archivos
 tcp_status = "🟢 TCP Activo" if engine.messaging.tcp_sock else "🔴 TCP Inactivo"
 st.sidebar.markdown(f"<p style='font-size:12px;'>{tcp_status}</p>", unsafe_allow_html=True)
 
+# Botón de descubrimiento manual de peers
+# Permite forzar una búsqueda inmediata
 if st.sidebar.button("🔍 Buscar Peers"):
     with st.sidebar.status("Buscando peers..."):
         engine.discovery.force_discover()
         st.sidebar.success("Búsqueda de peers completada")
 
-# Procesa y organiza la información de los peers conectados y anteriores
-# para su visualización en la interfaz
+# Gestión de peers y mapeo de identificadores
+# Esta sección es fundamental porque:
+# 1. Procesa la información de peers activos
+# 2. Maneja la conversión de formatos de ID
+# 3. Clasifica peers por estado de conexión
 now = datetime.now(UTC)
 
-raw_peers = engine.discovery.get_peers()  # keys uid_bytes or uid_str → {'ip','last_seen'}
+raw_peers = engine.discovery.get_peers()  # Obtiene diccionario de peers activos
 
-# Unificar: lista de tuples (name_str, uid_bytes, info)
+# Proceso de unificación de formatos de ID
+# Esta sección es crítica porque:
+# 1. Normaliza IDs en bytes y strings
+# 2. Mantiene la consistencia de datos
+# 3. Facilita la búsqueda y comparación
 peers = []
 for uid_key, info in raw_peers.items():
     if isinstance(uid_key, bytes):
@@ -95,10 +114,14 @@ for uid_key, info in raw_peers.items():
         uid_bytes = trimmed.ljust(20, b'\x00')
     peers.append((name_str, uid_bytes, info))
 
-# reverse_map: name_str → uid_bytes
+# Mapeo inverso para búsqueda rápida
+# Permite convertir nombres a IDs binarios
 reverse_map = {name: uid for name, uid, _ in peers}
 
-# Separar actuales / anteriores por last_seen
+# Clasificación de peers por estado
+# Separa peers en:
+# 1. Actuales (conectados recientemente)
+# 2. Anteriores (sin actividad reciente)
 current_peers = [
     name for name, _, info in peers
     if (now - info['last_seen']).total_seconds() < OFFLINE_THRESHOLD
@@ -108,8 +131,11 @@ previous_peers = [
     if (now - info['last_seen']).total_seconds() >= OFFLINE_THRESHOLD
 ]
 
-# Implementa la selección de peers para el chat, permitiendo elegir
-# entre peers actuales y anteriores
+# Interfaz de selección de peers
+# Esta sección es importante porque:
+# 1. Permite elegir destinatario
+# 2. Separa peers activos e inactivos
+# 3. Mantiene la selección en sesión
 st.sidebar.subheader("Peers Conectados")
 selected_current = st.sidebar.selectbox(
     "Selecciona un peer actual",
@@ -128,8 +154,11 @@ if selected_previous == "Ninguno":
 
 peer_name = selected_current or selected_previous
 
-# Implementa la funcionalidad de mensajes globales que se envían
-# a todos los peers conectados
+# Sistema de mensajería global
+# Esta sección implementa:
+# 1. Campo de entrada de mensaje
+# 2. Botón de envío
+# 3. Manejo de errores y confirmaciones
 st.sidebar.subheader("Mensaje Global")
 msg_global = st.sidebar.text_area("Escribe tu mensaje global aquí:")
 if st.sidebar.button("Enviar Mensaje Global"):
@@ -149,8 +178,11 @@ if st.sidebar.button("Enviar Mensaje Global"):
     else:
         st.sidebar.error("Por favor escribe algo antes de enviar")
 
-# Maneja la funcionalidad de envío de archivos, incluyendo validaciones
-# de tamaño y gestión de errores
+# Sistema de transferencia de archivos
+# Esta sección es crítica porque:
+# 1. Maneja la selección de archivos
+# 2. Valida tamaños y formatos
+# 3. Coordina la transferencia TCP
 st.sidebar.subheader("Enviar Archivo")
 if peer_name:
     uploaded = st.sidebar.file_uploader(
@@ -159,6 +191,11 @@ if peer_name:
         help=f"Tamaño máximo: {MAX_UPLOAD_SIZE/1024/1024:.1f} MB"
     )
     
+    # Validación y procesamiento de archivo
+    # Esta sección es importante porque:
+    # 1. Verifica límites de tamaño
+    # 2. Maneja la transferencia TCP
+    # 3. Actualiza el historial
     if uploaded is not None:
         file_size = len(uploaded.getvalue())
         if file_size > MAX_UPLOAD_SIZE:
@@ -188,11 +225,16 @@ if peer_name:
 else:
     st.sidebar.info("Selecciona un peer para enviar archivos")
 
-# Implementa el área principal de chat mostrando mensajes globales
-# y conversaciones privadas
+# Interfaz principal de chat
+# Esta sección implementa:
+# 1. Visualización de mensajes
+# 2. Historial de conversaciones
+# 3. Entrada de mensajes
 st.header("Chat")
 
-# Muestra los mensajes globales en el área principal
+# Sección de mensajes globales
+# Muestra todos los mensajes broadcast
+# con formato especial para identificación
 st.subheader("Mensajes Globales")
 global_msgs = engine.history_store.get_conversation("*global*")
 for e in global_msgs:
@@ -205,14 +247,21 @@ for e in global_msgs:
         with left, st.chat_message(e['sender']):
             st.write(f"[Global] {e['message']}")
 
-# Muestra la conversación privada con el peer seleccionado
+# Sección de chat privado
+# Esta sección es crítica porque:
+# 1. Muestra conversaciones individuales
+# 2. Diferencia mensajes y archivos
+# 3. Indica estados de transferencia
 if peer_name:
     st.subheader(f"Chat con {peer_name}")
     private = engine.history_store.get_conversation(peer_name)
     
-    # Filtrar mensajes globales que ya mostramos arriba
+    # Filtrado de mensajes
+    # Excluye mensajes globales ya mostrados
     private = [msg for msg in private if msg.get('recipient') != "*global*"]
     
+    # Visualización de mensajes y archivos
+    # Con formato diferenciado por tipo y origen
     for e in private:
         is_me = (e['sender'] == user)
         left, right = st.columns([3, 3])
@@ -222,7 +271,7 @@ if peer_name:
                     st.write(e['message'])
                 else:
                     st.write(f"[Archivo] {e['filename']}")
-                    # Mostrar estado de transferencia si es reciente
+                    # Indicador de transferencia reciente
                     if (now - e['timestamp']).total_seconds() < 30:
                         st.caption("✅ Transferido por TCP")
         else:
@@ -234,11 +283,17 @@ if peer_name:
                     if (now - e['timestamp']).total_seconds() < 30:
                         st.caption("✅ Transferido por TCP")
 
-    # 9.3) Enviar mensaje de texto
+    # Sistema de entrada de mensajes
+    # Esta sección es importante porque:
+    # 1. Maneja la entrada de texto
+    # 2. Procesa el envío asíncrono
+    # 3. Actualiza la interfaz en tiempo real
     txt = st.chat_input("Escribe tu mensaje...")
     if txt:
         st.session_state["__msg_pending__"] = txt
 
+    # Procesamiento de mensajes pendientes
+    # Maneja el envío y actualización del chat
     if "__msg_pending__" in st.session_state:
         m = st.session_state["__msg_pending__"]
         try:

@@ -985,5 +985,215 @@
     "recipient": "*global*",
     "message": "lklkklkl",
     "timestamp": "2025-05-29T06:39:04.675503+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "tete",
+    "recipient": "*global*",
+    "message": "dadada",
+    "timestamp": "2025-05-29T12:39:29.956696+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "dada",
+    "recipient": "Amalia              ",
+    "message": "hola",
+    "timestamp": "2025-05-29T12:47:00.672996+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Amalia              ",
+    "recipient": "dada",
+    "message": "hola",
+    "timestamp": "2025-05-29T12:47:08.685809+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "dada",
+    "recipient": "*global*",
+    "message": "hola\nadas",
+    "timestamp": "2025-05-29T12:47:19.019627+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "dada",
+    "recipient": "*global*",
+    "message": "adada",
+    "timestamp": "2025-05-29T12:47:28.647668+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "dada",
+    "recipient": "*global*",
+    "message": "fefefe",
+    "timestamp": "2025-05-29T12:47:31.026099+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Amalia              ",
+    "recipient": "*global*",
+    "message": "hola",
+    "timestamp": "2025-05-29T12:47:39.682136+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Amalia              ",
+    "recipient": "*global*",
+    "message": ";m;k;",
+    "timestamp": "2025-05-29T12:47:46.850158+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Amalia              ",
+    "recipient": "cdcdcd",
+    "message": "hola",
+    "timestamp": "2025-05-29T13:08:27.883097+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Amalia              ",
+    "recipient": "cdcdcd",
+    "message": "hoaaa",
+    "timestamp": "2025-05-29T13:08:35.551995+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "cdcdcd",
+    "recipient": "Amalia              ",
+    "message": "ninung hoa",
+    "timestamp": "2025-05-29T13:08:41.850725+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "cdcdcd",
+    "recipient": "*global*",
+    "message": "asa",
+    "timestamp": "2025-05-29T13:08:45.161056+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Amalia              ",
+    "recipient": "*global*",
+    "message": "hoaaa",
+    "timestamp": "2025-05-29T13:08:49.349407+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "seses",
+    "recipient": "Amalia              ",
+    "filename": "01.13.25. PC + FHV.pdf",
+    "timestamp": "2025-05-29T13:11:56.461847+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "seses",
+    "recipient": "Amalia              ",
+    "filename": "01.13.25. PC + FHV.pdf",
+    "timestamp": "2025-05-29T13:11:58.407518+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "seses",
+    "recipient": "Amalia              ",
+    "filename": "01.13.25. PC + FHV.pdf",
+    "timestamp": "2025-05-29T13:12:02.404406+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "tete",
+    "filename": "archivo_20250529_131449_204.bin",
+    "timestamp": "2025-05-29T13:14:49.773804+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "cece",
+    "filename": "archivo_20250529_131659_228.uek^LK;Wr=eԇuht뒢є'gWrak_#Wc2Ky͞9sؙT+尋j]1O",
+    "timestamp": "2025-05-29T13:16:59.081360+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "cece",
+    "filename": "archivo_20250529_131702_31.̱EPA'_Vq1$vkKV1EmBdg5A!XŉbmBsSE%)ڄr_f%qh_wZUO ",
+    "timestamp": "2025-05-29T13:17:02.748136+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "cece",
+    "recipient": "Amalia              ",
+    "filename": "cp2.pdf",
+    "timestamp": "2025-05-29T13:17:10.711487+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "dede",
+    "filename": "DF-1.7%21 0 obj___BitsPerComponent 8_ColorSpace _DeviceRGB_Height 127_Intent _RelativeColorimetric_Subtype _Image_Type _XObject_Width 1075_Filter [_FlateDecode _DCTDecode]_DecodeParms [null ___Quality_20250529_132156.bin",
+    "timestamp": "2025-05-29T13:21:56.847597+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "dddd",
+    "filename": "N@docProps_PKN@w^rdocProps_app.xmlN0HC{b'G[AzDm,۲ݪ_20250529_132428.bin",
+    "timestamp": "2025-05-29T13:24:28.448754+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "dddd",
+    "filename": "@!L!This program cannot be run in DOS mode.$PELcК_20250529_132434.bin",
+    "timestamp": "2025-05-29T13:24:34.108783+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "tetetet",
+    "filename": "DF-1.4_äüöß2 0 obj_Length 3 _20250529_132725.bin",
+    "timestamp": "2025-05-29T13:27:25.020567+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "vvzxvxz",
+    "filename": "archivo_20250529_134010_80.bin",
+    "timestamp": "2025-05-29T13:40:10.670436+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "dedede",
+    "filename": "archivo_20250529_135333_128.txt",
+    "timestamp": "2025-05-29T13:53:33.902756+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "yryr",
+    "recipient": "Amalia              ",
+    "filename": "enviar.txt",
+    "timestamp": "2025-05-29T13:55:08.198573+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "yeyeyeye",
+    "filename": "archivo_20250529_135720_151.docx",
+    "timestamp": "2025-05-29T13:57:20.081177+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "yeyeyeye",
+    "recipient": "Amalia              ",
+    "filename": "adadadasdasd.txt",
+    "timestamp": "2025-05-29T13:57:38.523468+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "yeyeyeye",
+    "recipient": "Amalia              ",
+    "filename": "adadadasdasd.txt",
+    "timestamp": "2025-05-29T13:57:41.628469+00:00"
   }
 ]

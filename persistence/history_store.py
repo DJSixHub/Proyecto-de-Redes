@@ -1,62 +1,56 @@
-# persistence/history_store.py
+# Este archivo maneja el almacenamiento persistente del historial de mensajes y archivos intercambiados
+# entre usuarios. El flujo de trabajo consiste en almacenar cada interacción en un archivo JSON,
+# manteniendo un registro cronológico de todas las comunicaciones. Cada entrada incluye metadatos
+# como tipo (mensaje/archivo), remitente, destinatario y timestamp. Los timestamps se manejan
+# consistentemente en UTC para evitar problemas de zonas horarias.
 
 import os
 import json
 from datetime import datetime, UTC
 from typing import List, Dict, Any
 
-# Este archivo implementa el sistema de persistencia para el historial de mensajes y archivos
-# del chat. El flujo de datos comienza con la inicialización del almacenamiento en un archivo JSON,
-# donde cada entrada contiene información sobre el tipo de contenido (mensaje o archivo), remitente,
-# destinatario y marca de tiempo. Los datos se almacenan con timestamps en UTC y se manejan
-# conversaciones tanto privadas como globales. El sistema garantiza la persistencia entre sesiones
-# y proporciona métodos para agregar y recuperar el historial de comunicaciones.
-
+# Clase principal para gestionar el almacenamiento del historial de comunicaciones
+# Esta clase es fundamental para:
+# 1. Mantener un registro persistente de todas las interacciones
+# 2. Gestionar conversaciones privadas y globales
+# 3. Manejar tanto mensajes de texto como transferencias de archivos
 class HistoryStore:
-    # Clase principal que gestiona el almacenamiento persistente del historial de chat.
-    # Maneja la escritura y lectura de mensajes y archivos en formato JSON, asegurando
-    # que todos los timestamps estén en UTC y que los datos sean consistentes.
+    # Inicializa el almacén de historial con la ruta al archivo JSON
+    # Crea el archivo y directorio si no existen para garantizar la persistencia
     def __init__(self, filename: str = "history.json"):
-        # Configuración del archivo de almacenamiento
         folder = os.path.dirname(os.path.abspath(__file__))
         self.path = os.path.join(folder, filename)
-        
-        # Creamos el directorio y el archivo si no existen
         os.makedirs(folder, exist_ok=True)
         if not os.path.exists(self.path):
             with open(self.path, 'w', encoding='utf-8') as f:
                 json.dump([], f)
 
-    # Método interno que maneja la lógica común de agregar entradas al historial,
-    # asegurando que los timestamps estén en formato UTC y manejando la persistencia
-    # en el archivo JSON.
+    # Método interno para agregar una nueva entrada al historial
+    # Maneja la conversión de timestamps y asegura la consistencia de los datos
     def _append(self, entry: Dict[str, Any]):
-        # Cargamos el historial existente o iniciamos uno nuevo
         try:
             history = self.load_raw()
         except Exception:
             history = []
 
-        # Normalizamos el timestamp a formato ISO con zona UTC
+        # Normalización del timestamp a formato ISO con zona horaria UTC
+        # Esto es crucial para mantener consistencia temporal en la aplicación
         if isinstance(entry['timestamp'], datetime):
             if entry['timestamp'].tzinfo is None:
                 entry['timestamp'] = entry['timestamp'].replace(tzinfo=UTC)
             entry['timestamp'] = entry['timestamp'].isoformat()
 
-        # Agregamos la entrada y guardamos el historial actualizado
         history.append(entry)
         with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
 
-    # Agrega un mensaje de texto al historial, asegurando que el timestamp esté en UTC.
-    # Este método es necesario para mantener un registro de todas las comunicaciones
-    # de texto entre usuarios.
+    # Agrega un mensaje de texto al historial
+    # Los parámetros incluyen remitente, destinatario, contenido y timestamp
     def append_message(self, sender: str, recipient: str, message: str, timestamp: datetime):
-        # Aseguramos que el timestamp tenga zona horaria UTC
+        # Aseguramos consistencia temporal con UTC
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=UTC)
             
-        # Creamos la entrada con todos los metadatos necesarios
         entry = {
             'type': 'message',
             'sender': sender,
@@ -66,15 +60,13 @@ class HistoryStore:
         }
         self._append(entry)
 
-    # Agrega un registro de transferencia de archivo al historial, asegurando que el
-    # timestamp esté en UTC. Este método es necesario para mantener un registro de
-    # todos los archivos compartidos entre usuarios.
+    # Agrega un registro de transferencia de archivo al historial
+    # Similar a append_message pero para archivos
     def append_file(self, sender: str, recipient: str, filename: str, timestamp: datetime):
-        # Aseguramos que el timestamp tenga zona horaria UTC
+        # Aseguramos consistencia temporal con UTC
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=UTC)
             
-        # Creamos la entrada con todos los metadatos necesarios
         entry = {
             'type': 'file',
             'sender': sender,
@@ -84,18 +76,20 @@ class HistoryStore:
         }
         self._append(entry)
 
-    # Recupera la conversación completa con un peer específico, incluyendo mensajes
-    # globales si no se está solicitando específicamente el historial global.
-    # Este método es esencial para mostrar el historial de chat en la interfaz.
+    # Recupera la conversación completa con un peer específico
+    # Esta función es crucial porque:
+    # 1. Maneja tanto mensajes privados como globales
+    # 2. Convierte timestamps a objetos datetime
+    # 3. Filtra mensajes relevantes según el contexto
     def get_conversation(self, peer: str) -> List[Dict[str, Any]]:
-        # Intentamos cargar el historial completo
         try:
             history = self.load_raw()
         except Exception as e:
             print(f"Error cargando historial: {e}")
             return []
 
-        # Procesamos los timestamps a objetos datetime con UTC
+        # Procesamiento de timestamps: convertimos strings ISO a datetime UTC
+        # Esto es necesario para poder realizar operaciones temporales con los mensajes
         for item in history:
             if isinstance(item.get('timestamp'), str):
                 try:
@@ -107,35 +101,34 @@ class HistoryStore:
                     print(f"Error parseando timestamp: {e}")
                     item['timestamp'] = datetime.now(UTC)
 
-        # Para mensajes globales, solo retornamos mensajes con recipient "*global*"
+        # Manejo especial para mensajes globales
         if peer == "*global*":
             return [
                 item for item in history
                 if item.get('recipient') == "*global*"
             ]
 
-        # Para conversaciones privadas, incluimos:
-        # 1. Mensajes enviados por el peer
-        # 2. Mensajes enviados al peer
-        # 3. Mensajes globales que NO son del peer (para evitar duplicados)
+        # Filtrado de mensajes para conversaciones privadas
+        # Incluye tanto mensajes directos como globales relevantes
         return [
             item for item in history
             if (
+                # Mensajes privados con el peer
                 item.get('sender') == peer or 
                 item.get('recipient') == peer or
+                # Mensajes globales (excepto los míos)
                 (item.get('recipient') == "*global*" and item.get('sender') != peer)
             )
         ]
 
-    # Carga el historial completo desde el archivo JSON sin procesar los timestamps.
-    # Este método es necesario para operaciones internas que requieren acceso
-    # a los datos brutos del historial.
+    # Carga el historial completo sin procesar
+    # Esta función es importante porque:
+    # 1. Proporciona acceso directo a los datos raw
+    # 2. Mantiene los timestamps en formato ISO
+    # 3. Maneja casos de archivo vacío o inexistente
     def load_raw(self) -> List[Dict[str, Any]]:
-        # Si el archivo no existe, retornamos una lista vacía
         if not os.path.exists(self.path):
             return []
-            
-        # Leemos y validamos el contenido del archivo
         with open(self.path, 'r', encoding='utf-8') as f:
             content = f.read().strip()
             if not content:

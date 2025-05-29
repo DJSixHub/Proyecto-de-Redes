@@ -1,5 +1,10 @@
 # core/messaging.py
 
+# Este archivo implementa el sistema de mensajería usando el protocolo LCP (Local Chat Protocol).
+# El flujo de trabajo consiste en manejar la comunicación entre peers, incluyendo mensajes de texto
+# y transferencia de archivos. Utiliza UDP para mensajes de control y TCP para transferencia de
+# archivos. El sistema maneja reintentos, timeouts y confirmaciones para garantizar la entrega.
+
 import threading
 import socket
 import os
@@ -26,70 +31,75 @@ from core.protocol import (
     USER_ID_SIZE
 )
 
-# Este archivo implementa el sistema de mensajería del chat utilizando el protocolo LCP.
-# El flujo de datos comienza con la inicialización de sockets UDP para mensajes de control
-# y TCP para transferencia de archivos. El sistema maneja el envío y recepción de mensajes
-# y archivos, implementa un sistema de confirmación (ACK) con reintentos automáticos,
-# coordina múltiples hilos para el procesamiento de mensajes entrantes, y gestiona la
-# limpieza periódica de datos temporales. También se encarga de la persistencia del
-# historial de comunicaciones y el manejo de errores en la red.
-
+# Clase principal para el manejo de mensajería entre peers
+# Esta clase es fundamental porque:
+# 1. Implementa el protocolo LCP para comunicación
+# 2. Maneja tanto mensajes de texto como archivos
+# 3. Garantiza la entrega confiable de mensajes
 class Messaging:
-    # Clase principal que implementa la comunicación entre peers usando el protocolo LCP.
-    # Maneja sockets UDP para mensajes de control y TCP para transferencia de archivos,
-    # implementa el sistema de ACKs con reintentos, y coordina múltiples hilos para
-    # el procesamiento de mensajes y mantenimiento del sistema.
+    # Inicializa el sistema de mensajería
+    # Parámetros:
+    # - user_id: Identificador único del usuario
+    # - discovery: Módulo de descubrimiento de peers
+    # - history_store: Almacenamiento de historial
     def __init__(self, user_id: bytes, discovery, history_store):
-        # Normalización del ID de usuario a formato estándar de 20 bytes
+        # Normalización del identificador de usuario
+        # Aseguramos exactamente 20 bytes con padding
         if isinstance(user_id, str):
             user_id = user_id.encode('utf-8')
         self.raw_id = user_id.rstrip(b'\x00')[:USER_ID_SIZE]
         self.user_id = self.raw_id.ljust(USER_ID_SIZE, b'\x00')
         print(f"ID inicializado: raw={self.raw_id!r}, padded={self.user_id!r}")
-        
-        # Referencias a servicios externos necesarios
         self.discovery = discovery
         self.history_store = history_store
 
         # Configuración del socket UDP para mensajes de control
-        # Reutilizamos el socket del sistema de discovery
+        # Ajustamos timeouts y tamaños de buffer para mejor rendimiento
         self.sock = discovery.sock
         self.sock.setblocking(True)
-        self.sock.settimeout(5.0)
+        self.sock.settimeout(5.0)  # Timeout estándar de 5 segundos
         
-        # Aumentamos los buffers para mejorar el rendimiento
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)  # 256KB
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)  # 256KB
+        # Optimización de buffers para mejor rendimiento
+        # 256KB para envío y recepción
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
 
-        # Configuración del socket TCP para transferencia de archivos
+        # Configuración del socket TCP para archivos
+        # Similar optimización de buffers que UDP
         self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)  # 256KB
-        self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)  # 256KB
+        self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+        self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
         self.tcp_sock.bind(('0.0.0.0', TCP_PORT))
         self.tcp_sock.listen(5)
         
-        # Sistema de ACKs para coordinar envíos y respuestas
-        self._acks = {}  # Mapeo de responder_uid -> threading.Event
+        # Sistema de coordinación de confirmaciones (ACKs)
+        # Usa eventos threading para sincronización
+        self._acks = {}             # Mapeo de uid a evento de confirmación
         self._acks_lock = threading.Lock()
         
-        # Contador para generar IDs únicos de mensajes/archivos
+        # Gestión de IDs únicos para mensajes
+        # Usa un contador cíclico de 0-255
         self._next_body_id = 0
         self._body_id_lock = threading.Lock()
         
-        # Almacenamiento temporal de headers para transferencias TCP
-        self._pending_headers = {}  # Mapeo de body_id -> (header, timestamp)
+        # Control de transferencias de archivos pendientes
+        # Almacena headers temporalmente para validación
+        self._pending_headers = {}  # Mapeo de body_id a (header, timestamp)
         self._pending_headers_lock = threading.Lock()
         
-        # Cola para procesamiento asíncrono de mensajes
+        # Cola de mensajes entrantes para procesamiento asíncrono
         self._message_queue = queue.Queue()
         
-        # Iniciamos hilos de mantenimiento y procesamiento
+        # Inicio de hilos de mantenimiento
+        # Limpieza de headers antiguos y procesamiento de mensajes
         threading.Thread(target=self._clean_pending_headers, daemon=True).start()
         threading.Thread(target=self._process_messages, daemon=True).start()
 
-    # Limpia periódicamente los headers pendientes que han expirado (más de 30 segundos)
-    # para evitar la acumulación de datos innecesarios en memoria y mantener el sistema
-    # limpio y eficiente.
+    # Limpieza periódica de headers pendientes
+    # Esta función es importante porque:
+    # 1. Evita acumulación de memoria
+    # 2. Elimina headers obsoletos
+    # 3. Mantiene el sistema limpio
     def _clean_pending_headers(self):
         while True:
             now = datetime.now(UTC)
@@ -98,29 +108,36 @@ class Messaging:
                     header, timestamp = self._pending_headers[body_id]
                     if (now - timestamp).total_seconds() > 30:
                         del self._pending_headers[body_id]
-            threading.Event().wait(5)
+            threading.Event().wait(5)  # Pausa entre ciclos de limpieza
 
-    # Genera un identificador único para cada mensaje o archivo, asegurando
-    # que no haya colisiones en las transferencias simultáneas y manteniendo
-    # el valor dentro del rango de un byte.
+    # Genera un ID único para el cuerpo del mensaje
+    # Esta función es crítica porque:
+    # 1. Asegura IDs únicos para mensajes
+    # 2. Mantiene el contador en rango válido
+    # 3. Es thread-safe para uso concurrente
     def _get_next_body_id(self):
         with self._body_id_lock:
             body_id = self._next_body_id
-            self._next_body_id = (self._next_body_id + 1) % 256
+            self._next_body_id = (self._next_body_id + 1) % 256  # Mantiene el ID en 1 byte
             return body_id
 
-    # Maneja el envío de datos y espera de confirmación con sistema de reintentos.
-    # Es necesario para garantizar la entrega confiable de mensajes y headers,
-    # implementando un mecanismo de reintento con espera exponencial.
+    # Envía datos y espera confirmación con reintentos
+    # Esta función es fundamental porque:
+    # 1. Implementa el mecanismo de confirmación
+    # 2. Maneja reintentos y timeouts
+    # 3. Garantiza la entrega confiable
     def _send_and_wait(self, data: bytes, recipient: bytes, timeout: float = 5.0, retries: int = 3):
+        # Verificación del peer en el sistema de descubrimiento
         info = self.discovery.get_peers().get(recipient)
         if not info:
             raise ValueError("Peer no encontrado en discovery")
         dest = (info['ip'], UDP_PORT)
 
+        # Preparación del evento de confirmación
         ev = threading.Event()
         key = recipient.rstrip(b'\x00')
         
+        # Ciclo de reintentos de envío
         for attempt in range(retries):
             with self._acks_lock:
                 self._acks[key] = ev
@@ -139,18 +156,23 @@ class Messaging:
                 with self._acks_lock:
                     self._acks.pop(key, None)
                     
+            # Espera exponencial entre reintentos
             if attempt < retries - 1:
                 threading.Event().wait(0.5 * (attempt + 1))
                 
         raise TimeoutError(f"No se recibió ACK de {recipient!r} después de {retries} intentos")
 
-    # Envía un mensaje de texto a un peer específico, manejando el protocolo
-    # de dos fases (header + body) y esperando confirmaciones. Es necesario
-    # para garantizar la entrega confiable de mensajes de texto.
+    # Envía un mensaje de texto a un peer específico
+    # Esta función es importante porque:
+    # 1. Implementa el protocolo de mensajes
+    # 2. Maneja la secuencia header-ACK-body-ACK
+    # 3. Incluye reintentos automáticos
     def send(self, recipient: bytes, message: bytes, timeout: float = 5.0):
+        # Preparación del mensaje y su identificador
         body_id = self._get_next_body_id()
         body = pack_message_body(body_id, message)
         
+        # Construcción y envío del header
         header = pack_header(
             user_from=self.user_id,
             user_to=recipient,
@@ -162,91 +184,88 @@ class Messaging:
             self._send_and_wait(header, recipient, timeout)
             self._send_and_wait(body, recipient, timeout)
         except (TimeoutError, ConnectionError) as e:
+            # Intento de redescubrimiento antes de fallar
             self.discovery.discover_peers()
             raise
 
-    # Envía un archivo a un peer específico usando TCP, con un protocolo de tres fases:
-    # anuncio UDP, transferencia TCP y confirmación final. Es necesario para garantizar
-    # la transferencia confiable de archivos grandes manteniendo el control del progreso.
+    # Envía un archivo a un peer específico usando TCP
+    # Esta función es crítica porque:
+    # 1. Maneja transferencias grandes eficientemente
+    # 2. Implementa el protocolo de archivos
+    # 3. Coordina UDP (control) y TCP (datos)
     def send_file(self, recipient: bytes, file_bytes: bytes, filename: str, timeout: float = None):
-        # Validación inicial del peer y obtención de su información
+        # Verificación del peer destino
         info = self.discovery.get_peers().get(recipient)
         if not info:
             raise ValueError("Peer no encontrado en discovery")
             
-        # Generación del ID único para este archivo
+        # Preparación del identificador y datos del archivo
         body_id = self._get_next_body_id()
         print(f"Enviando archivo {filename} (body_id={body_id})")
         
-        # Preparación del nombre del archivo para transmisión
-        name_b = filename.encode('utf-8')
-        if len(name_b) > 0xFFFF:
-            raise ValueError("Nombre de archivo demasiado largo")
-        name_len = len(name_b).to_bytes(2, 'big')
-        
-        # Construcción del cuerpo del mensaje según el protocolo:
-        # [8 bytes body_id][2 bytes name_len][name_bytes][file_bytes]
-        body = body_id.to_bytes(8, 'big') + name_len + name_b + file_bytes
-        
-        # Preparación del header UDP para anunciar la transferencia
+        # Preparación y envío del header UDP
+        # Según protocolo: BodyLength es el tamaño del archivo
         header = pack_header(
             user_from=self.user_id,
             user_to=recipient,
             op_code=OP_FILE,
             body_id=body_id,
-            body_len=len(body)
+            body_len=len(file_bytes)  # Tamaño total del archivo
         )
         
         try:
-            # Fase 1: Envío del header UDP y espera de ACK
+            # Envío del header y espera de confirmación
             self._send_and_wait(header, recipient, timeout or 5.0)
             print(f"Header UDP enviado, esperando ACK...")
             
-            # Pequeña pausa para asegurar que el receptor esté listo
+            # Pausa para sincronización con receptor
             time.sleep(0.5)
             
-            # Fase 2: Transferencia TCP del archivo
+            # Establecimiento de conexión TCP y transferencia
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                # Configuración del socket TCP para mejor rendimiento
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)  # 256KB buffer
-                sock.settimeout(timeout or 30.0)  # Timeout más largo para archivos grandes
+                # Configuración del socket para transferencia eficiente
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)  # Buffer optimizado
+                sock.settimeout(timeout or 30.0)
                 
-                # Establecimiento de la conexión TCP
                 print(f"Conectando a {info['ip']}:{TCP_PORT}...")
                 sock.connect((info['ip'], TCP_PORT))
                 
-                # Envío del archivo en chunks para mejor manejo de memoria
+                # Envío del ID del archivo (8 bytes)
+                file_id_bytes = body_id.to_bytes(8, 'big')
+                sock.send(file_id_bytes)
+                
+                # Transferencia del archivo en chunks para eficiencia
                 sent = 0
-                chunk_size = 32768  # 32KB por chunk
-                while sent < len(body):
-                    chunk = body[sent:sent + chunk_size]
+                chunk_size = 32768  # 32KB
+                while sent < len(file_bytes):
+                    chunk = file_bytes[sent:sent + chunk_size]
                     bytes_sent = sock.send(chunk)
                     if bytes_sent == 0:
                         raise ConnectionError("Conexión cerrada durante envío")
                     sent += bytes_sent
-                    print(f"Enviados {sent}/{len(body)} bytes")
+                    print(f"Enviados {sent}/{len(file_bytes)} bytes")
                 
-                # Fase 3: Espera del ACK final
+                # Finalización de la transferencia y espera de confirmación
                 print("Esperando ACK final...")
-                sock.shutdown(socket.SHUT_WR)  # Indicamos fin de transmisión
+                sock.shutdown(socket.SHUT_WR)  # Señalización de fin de datos
                 
-                # Configuración de timeout para el ACK final
-                sock.settimeout(5.0)
+                # Recepción de confirmación con timeout
+                sock.settimeout(5.0)  # Timeout específico para ACK
                 ack = sock.recv(RESPONSE_SIZE)
                 if not ack or len(ack) != RESPONSE_SIZE:
                     raise ConnectionError(f"ACK inválido: recibidos {len(ack) if ack else 0} bytes")
                     
                 try:
-                    # Procesamiento del ACK final
+                    # Procesamiento de la confirmación
                     resp = unpack_response(ack)
                     print(f"ACK recibido: status={resp['status']}, responder={resp['responder']!r}")
                     
                     # Manejo de diferentes estados de respuesta
                     if resp['status'] == RESP_OK:
                         print("Archivo enviado correctamente")
-                    elif resp['status'] == 1:
+                    elif resp['status'] == 1:  # Archivo existente
                         print("El archivo ya existe en el destino")
-                    elif resp['status'] == 2:
+                    elif resp['status'] == 2:  # Error interno
                         raise ConnectionError("Error general en el receptor")
                     else:
                         raise ConnectionError(f"Estado de ACK desconocido: {resp['status']}")
@@ -255,155 +274,311 @@ class Messaging:
                     print(f"Error decodificando ACK: {e}")
                     print(f"Bytes recibidos: {' '.join(f'{b:02x}' for b in ack)}")
                     raise
+                    
         except Exception as e:
             print(f"Error en transferencia TCP: {e}")
             raise
 
-    # Envía un mensaje a todos los peers conocidos usando broadcast UDP.
-    # Es necesario para comunicaciones globales que deben llegar a todos
-    # los participantes del chat.
+    # Envía un mensaje a todos los peers excepto broadcast
+    # Esta función es importante porque:
+    # 1. Maneja la difusión de mensajes
+    # 2. Ignora fallos individuales
+    # 3. Excluye el UID de broadcast
     def broadcast(self, message: bytes):
-        # Preparación del header para broadcast UDP
-        header = pack_header(
-            user_from=self.user_id,
-            user_to=BROADCAST_UID,
-            op_code=OP_MESSAGE,
-            body_id=self._get_next_body_id(),
-            body_len=len(message)
-        )
-        # Envío a la dirección de broadcast de la red
-        self.sock.sendto(header, ('255.255.255.255', UDP_PORT))
-
-    # Envía un mensaje a todos los peers conocidos de forma individual.
-    # Es necesario para garantizar la entrega confiable de mensajes a
-    # múltiples destinatarios cuando el broadcast no es suficiente.
-    def send_all(self, message: bytes):
-        # Envío individual a cada peer conocido
-        for peer in self.discovery.get_peers():
+        for peer_id in self.discovery.get_peers():
+            if peer_id == BROADCAST_UID:
+                continue
             try:
-                self.send(peer, message)
-            except Exception as e:
-                print(f"Error enviando a {peer!r}: {e}")
-                # Continuamos con el siguiente peer incluso si hay error
+                self.send(peer_id, message)
+            except:
+                pass
 
-    # Inicia el bucle de recepción de mensajes TCP y UDP.
-    # Es necesario para mantener el sistema de mensajería activo
-    # y procesando comunicaciones entrantes.
+    # Alias para envío de mensajes globales
+    # Mantiene compatibilidad con versiones anteriores
+    def send_all(self, message: bytes):
+        return self.broadcast(message)
+
+    # Inicia el hilo de escucha de mensajes
+    # Configura el receptor como daemon para limpieza automática
     def start_listening(self):
-        self.recv_loop()
+        threading.Thread(target=self.recv_loop, daemon=True).start()
 
-    # Procesa los mensajes en la cola de forma asíncrona.
-    # Es necesario para manejar los mensajes entrantes sin bloquear
-    # el hilo principal de recepción.
+    # Procesa mensajes de la cola en segundo plano
+    # Esta función es crítica porque:
+    # 1. Maneja mensajes de forma asíncrona
+    # 2. Evita bloqueos en el receptor
+    # 3. Aísla errores de procesamiento
     def _process_messages(self):
         while True:
             try:
-                # Espera y procesamiento de mensajes de la cola
-                msg = self._message_queue.get()
-                if msg:
-                    print(f"Procesando mensaje: {msg}")
+                hdr, body = self._message_queue.get()
+                self._handle_message_or_file(hdr, body)
             except Exception as e:
-                print(f"Error procesando mensaje: {e}")
+                print(f"Error procesando mensaje de la cola: {e}")
 
-    # Bucle principal de recepción que maneja tanto mensajes UDP como
-    # conexiones TCP entrantes. Es necesario para coordinar la recepción
-    # de todos los tipos de comunicación soportados por el sistema.
+    # Bucle principal de recepción de mensajes
+    # Esta función es fundamental porque:
+    # 1. Maneja todos los tipos de mensajes
+    # 2. Coordina TCP y UDP
+    # 3. Procesa confirmaciones
     def recv_loop(self):
-        # Iniciamos el hilo de aceptación TCP en paralelo
-        tcp_thread = threading.Thread(
-            target=self._tcp_accept_loop,
-            name="TCPAcceptLoop",
-            daemon=True
-        )
+        print("Iniciando loop de recepción de mensajes...")
+        
+        # Inicio del receptor TCP en hilo separado
+        tcp_thread = threading.Thread(target=self._tcp_accept_loop, daemon=True)
         tcp_thread.start()
-
-        # Bucle principal de recepción UDP
+        
         while True:
             try:
                 # Recepción de datos UDP
-                data, addr = self.sock.recvfrom(HEADER_SIZE)
+                data, addr = self.sock.recvfrom(4096)
+                print(f"\nRecibidos {len(data)} bytes desde {addr[0]}")
                 
-                # Procesamiento de headers LCP
-                if len(data) == HEADER_SIZE:
+                # Validación básica del paquete
+                if len(data) < 1:
+                    print("  - Paquete vacío, ignorando")
+                    continue
+
+                # Procesamiento de confirmaciones (ACKs)
+                if len(data) == RESPONSE_SIZE:
                     try:
-                        # Decodificación y validación del header
-                        hdr = unpack_header(data)
-                        print(f"Header recibido de {addr}: {hdr}")
+                        resp = unpack_response(data)
+                        print(f"  - Es un ACK (status={resp['status']})")
+                        if resp['status'] == 0:
+                            r = resp['responder'].rstrip(b'\x00')
+                            with self._acks_lock:
+                                ev = self._acks.get(r)
+                                if ev:
+                                    print(f"  - ACK esperado de {r!r}, notificando")
+                                    ev.set()
+                                    continue
+                                else:
+                                    print(f"  - ACK no esperado de {r!r}")
+                        self.discovery.handle_response(data, addr)
+                    except Exception as e:
+                        print(f"Error procesando ACK: {e}")
+                    continue
 
-                        # Verificación de destinatario
-                        if hdr['user_to'] != self.user_id and hdr['user_to'] != BROADCAST_UID:
-                            print(f"Ignorando mensaje para {hdr['user_to']!r}")
-                            continue
+                # Procesamiento de mensajes y archivos
+                if len(data) < HEADER_SIZE:
+                    print(f"  - Paquete demasiado corto para header ({len(data)} < {HEADER_SIZE})")
+                    continue
 
-                        # Evitamos procesar mensajes propios
-                        if hdr['user_from'] == self.user_id:
-                            print("Ignorando mensaje propio")
-                            continue
+                try:
+                    # Decodificación y validación del header
+                    hdr = unpack_header(data[:HEADER_SIZE])
+                    print(f"  - Header decodificado: op={hdr['op_code']}, from={hdr['user_from']!r}, to={hdr['user_to']!r}")
+                except Exception as e:
+                    print(f"Error desempaquetando header: {e}")
+                    continue
 
-                        # Envío de ACK al remitente
-                        resp = pack_response(0, self.user_id)
-                        self.sock.sendto(resp, addr)
+                # Manejo de pings de descubrimiento
+                # Los pings son mensajes broadcast con op_code 0
+                if hdr['op_code'] == 0 and hdr['user_to'] == BROADCAST_UID:
+                    print("  - Es un ping de discovery")
+                    self.discovery.handle_echo(data, addr)
+                    continue
 
-                        # Si hay cuerpo pendiente, guardamos el header
-                        if hdr['body_len'] > 0:
+                # Validación de destinatario del mensaje
+                # Determina si el mensaje es para este peer o es broadcast
+                my_id = self.raw_id.rstrip(b' ')
+                to_id = hdr['user_to'].rstrip(b' ')  # Sin padding nulo
+                from_id = hdr['user_from'].rstrip(b' ')  # Sin padding nulo
+                is_for_me = (to_id == my_id)
+                is_broadcast = (to_id == BROADCAST_UID)
+                
+                # Logging detallado para debugging de IDs
+                print(f"  - Destino: {'broadcast' if is_broadcast else ('para mí' if is_for_me else 'no es para mí')}")
+                print(f"  - Mi ID (sin espacios): {my_id!r}")
+                print(f"  - ID destino (sin espacios): {to_id!r}")
+                print(f"  - ID origen (sin espacios): {from_id!r}")
+                
+                # Procesamiento de mensajes y archivos destinados a este peer
+                if hdr['op_code'] in (OP_MESSAGE, OP_FILE) and (is_for_me or is_broadcast):
+                    try:
+                        print(f"Procesando mensaje de {addr[0]} tipo {hdr['op_code']} {'(broadcast)' if is_broadcast else ''}")
+                        
+                        # Envío de confirmación de recepción de header
+                        self.sock.sendto(pack_response(0, self.user_id), addr)
+                        print("  - ACK de header enviado")
+
+                        # Manejo de mensajes de texto
+                        if hdr['op_code'] == OP_MESSAGE:
+                            # Preparación para recepción del cuerpo
+                            body_len = hdr['body_len']
+                            body = bytearray()
+                            
+                            try:
+                                # Configuración de timeout para el cuerpo
+                                self.sock.settimeout(5.0)
+                                print(f"  - Esperando cuerpo del mensaje ({body_len} bytes)")
+                                
+                                # Recepción del cuerpo completo
+                                # Buffer grande para minimizar fragmentación
+                                chunk, _ = self.sock.recvfrom(65536)  # 64KB
+                                if not chunk:
+                                    raise ConnectionError("Conexión cerrada durante recepción")
+                                    
+                                print(f"    - Recibidos {len(chunk)} bytes")
+                                
+                                # Validación de integridad del mensaje
+                                if len(chunk) != body_len:
+                                    print(f"    - ADVERTENCIA: Tamaño recibido ({len(chunk)}) != esperado ({body_len})")
+                                    
+                                body.extend(chunk)
+                                
+                                # Confirmación de recepción del cuerpo
+                                self.sock.sendto(pack_response(0, self.user_id), addr)
+                                print("  - ACK de cuerpo enviado")
+                                
+                                # Encolado para procesamiento asíncrono
+                                self._message_queue.put((hdr, bytes(body)))
+                                print(f"  - Mensaje encolado para procesamiento")
+                                
+                            except socket.timeout:
+                                print("Timeout recibiendo cuerpo del mensaje")
+                                self.sock.sendto(pack_response(2, self.user_id), addr)
+                            finally:
+                                # Restauración del timeout por defecto
+                                self.sock.settimeout(5.0)
+                                
+                        # Manejo de transferencias de archivos
+                        elif hdr['op_code'] == OP_FILE:
+                            # Rechazo de archivos broadcast por seguridad
+                            if is_broadcast:
+                                print("  - Ignorando archivo broadcast")
+                                self.sock.sendto(pack_response(1, self.user_id), addr)
+                                continue
+                                
+                            # Registro del header para la transferencia TCP
                             with self._pending_headers_lock:
                                 self._pending_headers[hdr['body_id']] = (hdr, datetime.now(UTC))
-
+                            print("  - Header guardado para transferencia TCP")
+                            
                     except Exception as e:
-                        print(f"Error procesando header: {e}")
-                        continue
-
-                # Procesamiento de respuestas (ACKs)
-                elif len(data) == RESPONSE_SIZE:
-                    try:
-                        # Decodificación de la respuesta
-                        resp = unpack_response(data)
-                        key = resp['responder'].rstrip(b'\x00')
-                        
-                        # Notificación al hilo esperando el ACK
-                        with self._acks_lock:
-                            ev = self._acks.get(key)
-                            if ev:
-                                ev.set()
-                    except Exception as e:
-                        print(f"Error procesando respuesta: {e}")
-                        continue
-
+                        print(f"Error procesando mensaje: {e}")
+                        try:
+                            self.sock.sendto(pack_response(2, self.user_id), addr)
+                        except:
+                            pass
+                else:
+                    print("  - Mensaje ignorado (no es para mí ni broadcast)")
             except socket.timeout:
-                continue  # Timeout normal, seguimos escuchando
+                continue  # Timeout normal, continuar escuchando
             except Exception as e:
                 print(f"Error en recv_loop: {e}")
                 continue
 
-    # Acepta conexiones TCP entrantes para transferencia de archivos.
-    # Es necesario para manejar las conexiones de transferencia de archivos
-    # de forma asíncrona sin bloquear el bucle principal de recepción.
+    # Bucle de aceptación de conexiones TCP para archivos
+    # Esta función es crítica porque:
+    # 1. Maneja conexiones entrantes de archivos
+    # 2. Crea hilos dedicados por transferencia
+    # 3. Mantiene el sistema responsive
     def _tcp_accept_loop(self):
-        print("Iniciando bucle de aceptación TCP...")
         while True:
             try:
-                # Aceptación de nuevas conexiones TCP
-                sock, addr = self.tcp_sock.accept()
-                print(f"Nueva conexión TCP desde {addr}")
-                
-                # Iniciamos un hilo dedicado para manejar la transferencia
+                client_sock, addr = self.tcp_sock.accept()
                 threading.Thread(
                     target=self._handle_tcp_file_transfer,
-                    args=(sock, addr),
+                    args=(client_sock, addr),
                     daemon=True
                 ).start()
             except Exception as e:
                 print(f"Error aceptando conexión TCP: {e}")
+                continue
 
-    # Maneja la transferencia de archivos por TCP, incluyendo la validación
-    # del header, la recepción del archivo y el envío de confirmaciones.
-    # Es necesario para garantizar la transferencia confiable de archivos
-    # grandes y su correcta persistencia.
+    # Sanitiza el nombre del archivo eliminando caracteres no válidos
+    # Esta función es importante porque:
+    # 1. Elimina caracteres nulos y no imprimibles
+    # 2. Asegura nombres de archivo válidos
+    # 3. Preserva el nombre original lo más posible
+    def _sanitize_filename(self, filename: str) -> str:
+        # Separar nombre y extensión
+        name, ext = os.path.splitext(filename)
+        
+        # Si no tiene extensión, intentar detectar por contenido
+        if not ext:
+            ext = '.bin'  # Por defecto
+            
+        # Eliminar caracteres no imprimibles y nulos del nombre
+        clean_name = ''.join(c for c in name if c.isalnum() or c in '- _')
+        
+        # Si el nombre quedó vacío, usar nombre genérico
+        if not clean_name:
+            clean_name = f"archivo_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+        
+        # Asegurar que la extensión sea válida
+        clean_ext = ext.lower()
+        if not clean_ext.startswith('.'):
+            clean_ext = '.' + clean_ext
+            
+        # Combinar nombre limpio y extensión
+        return f"{clean_name}{clean_ext}"
+
+    def _detect_file_type(self, data: bytes) -> str:
+        """Detecta el tipo de archivo basado en sus bytes iniciales (magic numbers)"""
+        # Diccionario de firmas de archivos comunes
+        signatures = {
+            # Documentos
+            b'%PDF': '.pdf',
+            b'\x50\x4B\x03\x04': '.docx',  # También puede ser .xlsx, .pptx, .zip
+            bytes([0xD0, 0xCF, 0x11, 0xE0]): '.doc',  # Archivos antiguos de Office
+            
+            # Imágenes
+            b'\xFF\xD8\xFF': '.jpg',
+            b'\x89PNG\r\n\x1A\n': '.png',
+            b'GIF87a': '.gif',
+            b'GIF89a': '.gif',
+            b'BM': '.bmp',
+            
+            # Texto y código
+            b'<!DOCTYPE html': '.html',
+            b'<html': '.html',
+            b'<?xml': '.xml',
+            b'{\n': '.json',  # Común en archivos JSON
+            b'{\r\n': '.json',
+            
+            # Comprimidos
+            b'\x1F\x8B\x08': '.gz',
+            b'PK': '.zip',
+            b'Rar!': '.rar',
+            
+            # Python
+            b'#!/usr/bin/env python': '.py',
+            b'# -*- coding': '.py'
+        }
+        
+        # Convertir los primeros bytes a texto para detectar archivos de texto
+        try:
+            start = data[:min(len(data), 1024)].decode('utf-8')
+            # Si se puede decodificar como UTF-8 y no tiene caracteres nulos, probablemente es texto
+            if '\x00' not in start:
+                return '.txt'
+        except UnicodeDecodeError:
+            pass
+            
+        # Revisar firmas conocidas
+        for signature, extension in signatures.items():
+            if data.startswith(signature):
+                return extension
+                
+        # Si no se reconoce la firma, intentar detectar por contenido
+        # Verificar si parece un archivo de texto a pesar de no estar en UTF-8
+        text_chars = bytearray({7,8,9,10,12,13,27} | set(range(0x20, 0x100)) - {0x7f})
+        is_binary = bool(data.translate(None, text_chars))
+        if not is_binary:
+            return '.txt'
+            
+        # Si no se puede determinar, usar .bin
+        return '.bin'
+
+    # Maneja la transferencia de un archivo por TCP
+    # Esta función es fundamental porque:
+    # 1. Implementa el protocolo de archivos
+    # 2. Maneja la recepción por partes
+    # 3. Valida la integridad de los datos
     def _handle_tcp_file_transfer(self, sock: socket.socket, addr):
-        print(f"Manejando transferencia de archivo desde {addr}")
-        sock.settimeout(30.0)  # Timeout extendido para archivos grandes
-
-        # Función auxiliar para recibir exactamente n bytes
+        # Función auxiliar para lectura exacta de bytes
         def recv_exact(n):
             data = bytearray()
             while len(data) < n:
@@ -413,162 +588,175 @@ class Messaging:
                 data.extend(chunk)
             return bytes(data)
 
-        # Función auxiliar para detectar el tipo de archivo basado en firmas
-        def detect_file_type(header_bytes):
-            signatures = {
-                b'\xFF\xD8\xFF': 'jpg',      # JPEG
-                b'\x89\x50\x4E\x47': 'png',  # PNG
-                b'\x47\x49\x46\x38': 'gif',  # GIF
-                b'%PDF': 'pdf',              # PDF
-                b'PK\x03\x04': 'zip'         # ZIP
-            }
-            for sig, ext in signatures.items():
-                if header_bytes.startswith(sig):
-                    return ext
-            return None
-
         try:
-            # Fase 1: Recepción y validación del ID del archivo
+            # Recepción del identificador del archivo (8 bytes)
             file_id = int.from_bytes(recv_exact(8), 'big')
             print(f"ID de archivo recibido: {file_id}")
-
-            # Búsqueda y validación del header correspondiente
+            
+            # Validación contra headers pendientes
             with self._pending_headers_lock:
                 if file_id not in self._pending_headers:
                     print(f"No hay header pendiente para file_id={file_id}")
-                    sock.send(pack_response(2, self.user_id))
+                    sock.send(pack_response(2, self.user_id))  # Error
                     return
-                header, _ = self._pending_headers[file_id]
-                del self._pending_headers[file_id]
+                    
+                hdr, _ = self._pending_headers[file_id]
+                del self._pending_headers[file_id]  # Limpiar header usado
 
-            # Fase 2: Validación del remitente
-            peer_ip = addr[0]
-            peers = self.discovery.get_peers()
-            sender = None
-            for uid, info in peers.items():
-                if info['ip'] == peer_ip:
-                    sender = uid
-                    break
-
-            if not sender or sender != header['user_from']:
-                print(f"Remitente no válido: {sender!r} != {header['user_from']!r}")
+            # Recepción del contenido del archivo
+            # Según protocolo: BodyLength es el tamaño exacto del archivo
+            body_len = hdr['body_len']  # Ya no restamos 8 bytes
+            if body_len <= 0:
+                print(f"Tamaño de archivo inválido: {body_len}")
                 sock.send(pack_response(2, self.user_id))
                 return
 
-            # Fase 3: Recepción del nombre del archivo
-            name_len = int.from_bytes(recv_exact(2), 'big')
-            if not 0 < name_len <= 0xFFFF:
-                print(f"Longitud de nombre inválida: {name_len}")
-                sock.send(pack_response(2, self.user_id))
-                return
+            # Recepción por chunks para archivos grandes
+            body = bytearray()
+            chunk_size = 32768  # 32KB
+            received = 0
+            
+            print(f"Iniciando recepción de {body_len} bytes...")
+            while received < body_len:
+                remaining = body_len - received
+                current_chunk = min(chunk_size, remaining)
+                chunk = recv_exact(current_chunk)
+                if not chunk:
+                    raise ConnectionError("Conexión cerrada durante recepción")
+                body.extend(chunk)
+                received += len(chunk)
+                if received % (1024 * 1024) == 0:  # Reportar progreso cada 1MB
+                    print(f"Recibidos {received}/{body_len} bytes ({(received/body_len)*100:.1f}%)")
 
-            filename = recv_exact(name_len).decode('utf-8')
-            print(f"Nombre de archivo: {filename}")
+            body = bytes(body)  # Convertir a bytes inmutables
+            print(f"Recepción completa: {len(body)} bytes")
 
-            # Fase 4: Preparación para recepción del contenido
-            remaining = header['body_len'] - 8 - 2 - name_len
-            if remaining <= 0:
-                print(f"Longitud de archivo inválida: {remaining}")
-                sock.send(pack_response(2, self.user_id))
-                return
+            # Detectar el tipo de archivo
+            extension = self._detect_file_type(body)
+            print(f"Tipo de archivo detectado: {extension}")
 
-            # Creación del directorio de descargas
-            downloads = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Descargas")
-            os.makedirs(downloads, exist_ok=True)
+            # Preparación del directorio de descargas
+            downloads_dir = os.path.join(os.getcwd(), "Descargas")
+            os.makedirs(downloads_dir, exist_ok=True)
 
-            # Detección del tipo de archivo y generación de nombre único
-            base, ext = os.path.splitext(filename)
-            if not ext and (peek := recv_exact(4)):
-                detected = detect_file_type(peek)
-                if detected:
-                    ext = f".{detected}"
-                remaining -= 4
-            else:
-                peek = b''
+            # Generar nombre de archivo con la extensión correcta
+            timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+            filename = f"archivo_{timestamp}_{file_id & 0xFF}{extension}"
+            path = os.path.join(downloads_dir, filename)
 
-            # Generación de nombre único para evitar sobrescrituras
-            counter = 0
-            while True:
-                test_name = f"{base}{f'_{counter}' if counter else ''}{ext}"
-                full_path = os.path.join(downloads, test_name)
-                if not os.path.exists(full_path):
-                    break
-                counter += 1
+            # Guardar el archivo
+            with open(path, 'wb') as f:
+                f.write(body)
+            print(f"Archivo guardado como {filename}")
 
-            # Fase 5: Recepción y escritura del archivo
-            print(f"Guardando en {full_path}")
-            with open(full_path, 'wb') as f:
-                if peek:
-                    f.write(peek)
+            # Enviar confirmación según protocolo
+            sock.send(pack_response(0, self.user_id))
+            print("ACK enviado")
 
-                received = len(peek)
-                while received < remaining:
-                    chunk = sock.recv(min(32768, remaining - received))
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    received += len(chunk)
-                    print(f"Progreso: {received}/{remaining} bytes")
-
-            # Fase 6: Validación y registro del archivo recibido
-            if received == remaining:
-                print("Archivo recibido completamente")
-                sock.send(pack_response(0, self.user_id))
-
-                # Registro en el historial
-                self.history_store.append_file(
-                    sender=header['user_from'],
-                    recipient=self.user_id,
-                    filename=os.path.basename(full_path),
-                    timestamp=datetime.now(UTC)
-                )
-            else:
-                print(f"Archivo incompleto: {received}/{remaining} bytes")
-                sock.send(pack_response(2, self.user_id))
-                try:
-                    os.unlink(full_path)  # Eliminamos el archivo incompleto
-                except:
-                    pass
+            # Registro en el historial de transferencias
+            self.history_store.append_file(
+                sender=addr[0],
+                recipient=self.raw_id.decode('utf-8'),
+                filename=filename,
+                timestamp=datetime.now(UTC)
+            )
 
         except Exception as e:
-            print(f"Error en transferencia: {e}")
+            print(f"Error en transferencia TCP: {e}")
             try:
-                sock.send(pack_response(2, self.user_id))
+                # Notificación de error al remitente
+                sock.send(pack_response(2, self.user_id))  # Status 2 = Error
             except:
                 pass
-
+            raise
         finally:
             try:
-                sock.close()
+                sock.shutdown(socket.SHUT_RDWR)
             except:
                 pass
+            sock.close()
 
-    # Procesa mensajes y archivos recibidos, actualizando el historial
-    # y manejando diferentes tipos de contenido. Es necesario para mantener
-    # un registro consistente de todas las comunicaciones.
     def _handle_message_or_file(self, hdr, body: bytes):
+        """Procesa un mensaje o archivo recibido"""
         try:
-            # Extracción del ID del mensaje y su contenido
-            msg_id, content = unpack_message_body(body)
+            # Normalización de identificadores
+            # Elimina padding y espacios para comparación
+            peer_id = hdr['user_from'].rstrip(b'\x00')
+            my_id = self.raw_id.rstrip(b' ')
+            to_id = hdr['user_to'].rstrip(b' ')
+            from_id = hdr['user_from'].rstrip(b' ')
             
-            # Procesamiento según el tipo de contenido
+            # Preparación de metadatos del mensaje
+            peer = peer_id.decode('utf-8', errors='ignore')
+            is_broadcast = (to_id == BROADCAST_UID)
+
+            # Logging detallado para debugging
+            print(f"Procesando mensaje/archivo de {peer} ({hdr['op_code']}) {'(broadcast)' if is_broadcast else ''}")
+            print(f"  - ID origen: {peer_id!r}")
+            print(f"  - ID destino: {to_id!r}")
+            print(f"  - ID local: {my_id!r}")
+            print(f"  - Longitud body: {len(body)} bytes")
+
+            # Procesamiento de mensajes de texto
             if hdr['op_code'] == OP_MESSAGE:
-                # Registro del mensaje en el historial
-                self.history_store.append_message(
-                    sender=hdr['user_from'],
-                    recipient=hdr['user_to'],
-                    message=content.decode('utf-8'),
-                    timestamp=datetime.now(UTC)
-                )
-            
-            elif hdr['op_code'] == OP_FILE:
-                # Registro de la transferencia de archivo en el historial
-                self.history_store.append_file(
-                    sender=hdr['user_from'],
-                    recipient=hdr['user_to'],
-                    filename=content.decode('utf-8'),
-                    timestamp=datetime.now(UTC)
-                )
+                # Extracción y validación del contenido
+                message_id, content = unpack_message_body(body)
+                # Verificación de consistencia de IDs
+                if (message_id & 0xFF) != hdr['body_id']:
+                    print(f"  - Warning: ID de mensaje no coincide: header={hdr['body_id']}, body={message_id & 0xFF}")
+                    
+                # Decodificación del texto con manejo de errores
+                text = content.decode('utf-8', errors='ignore')
+                print(f"  - Mensaje decodificado ({len(text)} chars): {text[:50]}...")
                 
+                # Registro en el historial
+                self.history_store.append_message(
+                    sender=peer,
+                    recipient="*global*" if is_broadcast else my_id.decode('utf-8'),
+                    message=text,
+                    timestamp=datetime.now(UTC)
+                )
+                print("  - Mensaje guardado en historial")
+            else:
+                # Rechazo de archivos broadcast por seguridad
+                if is_broadcast:
+                    print("  - Ignorando archivo broadcast")
+                    return
+                    
+                # Procesamiento de archivo recibido
+                file_id = int.from_bytes(body[:8], 'big')
+                # Validación de consistencia del ID
+                if (file_id & 0xFF) != hdr['body_id']:
+                    print(f"  - Warning: ID de archivo no coincide: header={hdr['body_id']}, body={file_id & 0xFF}")
+                    
+                # Extracción del contenido binario
+                file_data = body[8:]
+                
+                # Generación de nombre único para el archivo
+                timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+                filename = f"archivo_{timestamp}_{file_id & 0xFF}.bin"
+                print(f"  - Guardando archivo como: {filename} ({len(file_data)} bytes)")
+
+                # Preparación del directorio de descargas
+                downloads_dir = os.path.join(os.getcwd(), "Descargas")
+                os.makedirs(downloads_dir, exist_ok=True)
+                path = os.path.join(downloads_dir, filename)
+                
+                # Almacenamiento del archivo en disco
+                with open(path, 'wb') as f:
+                    f.write(file_data)
+
+                # Registro en el historial de transferencias
+                self.history_store.append_file(
+                    sender=peer,
+                    recipient=my_id.decode('utf-8'),
+                    filename=filename,
+                    timestamp=datetime.now(UTC)
+                )
+                print("  - Archivo guardado en Descargas/")
         except Exception as e:
+            # Logging detallado de errores para debugging
             print(f"Error procesando mensaje/archivo: {e}")
+            print(f"  - Header: {hdr}")
+            print(f"  - Body length: {len(body)}")
+            # Supresión de excepciones para mantener el sistema funcionando
