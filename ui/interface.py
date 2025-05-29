@@ -6,7 +6,13 @@ import streamlit as st
 from datetime import datetime, UTC
 from streamlit_autorefresh import st_autorefresh
 
-# --- Ajuste de sys.path para importar core/ y persistence/ ---
+# Este archivo implementa la interfaz gráfica del chat utilizando Streamlit. El flujo de la aplicación
+# comienza con la autenticación del usuario mediante un ID, luego inicializa el motor de comunicación
+# que maneja las conexiones P2P. La interfaz se actualiza automáticamente cada 3 segundos y muestra
+# una barra lateral con información del usuario y controles, mientras que el área principal muestra
+# las conversaciones. El sistema permite enviar mensajes privados, mensajes globales y archivos,
+# manteniendo un registro del historial de comunicaciones y el estado de los peers conectados.
+
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
@@ -19,7 +25,8 @@ OFFLINE_THRESHOLD = 20.0  # segundos
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB máximo para archivos
 REFRESH_INTERVAL = 3000  # ms
 
-# 1️⃣ Login de User ID
+# Maneja la autenticación del usuario solicitando un ID único que se almacenará
+# en la sesión. Es necesario para identificar al usuario en la red P2P.
 if 'user_id' not in st.session_state or not st.session_state['user_id']:
     st.title("LCP Chat Interface")
     with st.form("login_form"):
@@ -34,7 +41,8 @@ if 'user_id' not in st.session_state or not st.session_state['user_id']:
 
 user = st.session_state['user_id']
 
-# 2️⃣ Inicializar Engine
+# Inicializa el motor de comunicación P2P si no existe en la sesión actual.
+# Este componente es crucial para manejar la comunicación entre peers.
 if 'engine' not in st.session_state:
     try:
         engine = Engine(user_id=user)
@@ -46,10 +54,12 @@ if 'engine' not in st.session_state:
 else:
     engine = st.session_state['engine']
 
-# 3️⃣ Refrescar cada 3 segundos
+# Configura el refresco automático de la interfaz para mantener
+# la información actualizada sin intervención del usuario
 st_autorefresh(interval=REFRESH_INTERVAL, key="auto_refresh")
 
-# 4️⃣ Sidebar: Usuario, IP y acciones
+# Configura la barra lateral con información del usuario y controles de conexión.
+# Muestra el estado de la conexión TCP y permite buscar nuevos peers.
 st.sidebar.title(f"Usuario: {user}")
 st.sidebar.markdown(
     f"<p style='font-size:12px; color:gray;'>IP: {engine.discovery.local_ip}</p>",
@@ -65,7 +75,8 @@ if st.sidebar.button("🔍 Buscar Peers"):
         engine.discovery.force_discover()
         st.sidebar.success("Búsqueda de peers completada")
 
-# 5️⃣ Construir lista de peers y mappings
+# Procesa y organiza la información de los peers conectados y anteriores
+# para su visualización en la interfaz
 now = datetime.now(UTC)
 
 raw_peers = engine.discovery.get_peers()  # keys uid_bytes or uid_str → {'ip','last_seen'}
@@ -97,7 +108,8 @@ previous_peers = [
     if (now - info['last_seen']).total_seconds() >= OFFLINE_THRESHOLD
 ]
 
-# 6️⃣ Selección de peer
+# Implementa la selección de peers para el chat, permitiendo elegir
+# entre peers actuales y anteriores
 st.sidebar.subheader("Peers Conectados")
 selected_current = st.sidebar.selectbox(
     "Selecciona un peer actual",
@@ -116,7 +128,8 @@ if selected_previous == "Ninguno":
 
 peer_name = selected_current or selected_previous
 
-# 7️⃣ Mensaje Global
+# Implementa la funcionalidad de mensajes globales que se envían
+# a todos los peers conectados
 st.sidebar.subheader("Mensaje Global")
 msg_global = st.sidebar.text_area("Escribe tu mensaje global aquí:")
 if st.sidebar.button("Enviar Mensaje Global"):
@@ -136,7 +149,8 @@ if st.sidebar.button("Enviar Mensaje Global"):
     else:
         st.sidebar.error("Por favor escribe algo antes de enviar")
 
-# 8️⃣ Envío de archivos (Sidebar)
+# Maneja la funcionalidad de envío de archivos, incluyendo validaciones
+# de tamaño y gestión de errores
 st.sidebar.subheader("Enviar Archivo")
 if peer_name:
     uploaded = st.sidebar.file_uploader(
@@ -174,10 +188,11 @@ if peer_name:
 else:
     st.sidebar.info("Selecciona un peer para enviar archivos")
 
-# 9️⃣ Área principal de chat
+# Implementa el área principal de chat mostrando mensajes globales
+# y conversaciones privadas
 st.header("Chat")
 
-# 9.1) Mostrar mensajes globales siempre
+# Muestra los mensajes globales en el área principal
 st.subheader("Mensajes Globales")
 global_msgs = engine.history_store.get_conversation("*global*")
 for e in global_msgs:
@@ -190,7 +205,7 @@ for e in global_msgs:
         with left, st.chat_message(e['sender']):
             st.write(f"[Global] {e['message']}")
 
-# 9.2) Mostrar conversación privada si hay peer seleccionado
+# Muestra la conversación privada con el peer seleccionado
 if peer_name:
     st.subheader(f"Chat con {peer_name}")
     private = engine.history_store.get_conversation(peer_name)

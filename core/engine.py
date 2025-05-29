@@ -4,6 +4,13 @@ import threading
 import os
 import sys
 
+# Este archivo implementa el motor principal del sistema de chat, orquestando todos los componentes.
+# El flujo comienza con la inicialización del motor que coordina el descubrimiento de peers,
+# la mensajería y la persistencia de datos. Primero, configura el ID del usuario y los almacenes
+# de datos persistentes, luego inicializa el sistema de descubrimiento filtrando peers locales,
+# y finalmente configura el sistema de mensajería. El motor actúa como punto central de control,
+# gestionando el ciclo de vida de los componentes y sus interacciones.
+
 # Asegurar que PROJECT_ROOT esté en sys.path para importaciones relativas
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -16,11 +23,9 @@ from persistence.history_store import HistoryStore
 
 
 class Engine:
-    """
-    Orquesta Discovery, Messaging y persistencia.
-    Filtra peers locales al cargar el JSON guardado.
-    """
-
+    # Clase principal que orquesta todos los componentes del sistema de chat.
+    # Coordina el descubrimiento de peers, la mensajería y la persistencia,
+    # asegurando que todos los componentes trabajen juntos de manera coherente.
     def __init__(self,
                  user_id: bytes,
                  broadcast_interval: float = 1.0):
@@ -58,6 +63,9 @@ class Engine:
             history_store=self.history_store
         )
 
+    # Inicia el sistema de mensajería en un hilo separado, permitiendo la
+    # recepción asíncrona de mensajes mientras el sistema de descubrimiento
+    # ya está ejecutándose desde su inicialización.
     def start(self):
         """
         Arranca el hilo de recepción de mensajes.
