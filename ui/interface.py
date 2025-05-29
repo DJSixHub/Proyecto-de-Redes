@@ -3,7 +3,7 @@
 import os
 import sys
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, UTC
 from streamlit_autorefresh import st_autorefresh
 
 # --- Ajuste de sys.path para importar core/ y persistence/ ---
@@ -13,6 +13,11 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from core.engine import Engine
+
+# Constantes
+OFFLINE_THRESHOLD = 20.0  # segundos
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB máximo para archivos
+REFRESH_INTERVAL = 3000  # ms
 
 # 1️⃣ Login de User ID
 if 'user_id' not in st.session_state or not st.session_state['user_id']:
@@ -31,14 +36,18 @@ user = st.session_state['user_id']
 
 # 2️⃣ Inicializar Engine
 if 'engine' not in st.session_state:
-    engine = Engine(user_id=user)
-    engine.start()
-    st.session_state['engine'] = engine
+    try:
+        engine = Engine(user_id=user)
+        engine.start()
+        st.session_state['engine'] = engine
+    except Exception as e:
+        st.error(f"Error al inicializar el chat: {e}")
+        st.stop()
 else:
     engine = st.session_state['engine']
 
 # 3️⃣ Refrescar cada 3 segundos
-st_autorefresh(interval=3000, key="auto_refresh")
+st_autorefresh(interval=REFRESH_INTERVAL, key="auto_refresh")
 
 # 4️⃣ Sidebar: Usuario, IP y acciones
 st.sidebar.title(f"Usuario: {user}")
@@ -46,13 +55,18 @@ st.sidebar.markdown(
     f"<p style='font-size:12px; color:gray;'>IP: {engine.discovery.local_ip}</p>",
     unsafe_allow_html=True
 )
+
+# Estado de la conexión TCP
+tcp_status = "🟢 TCP Activo" if engine.messaging.tcp_sock else "🔴 TCP Inactivo"
+st.sidebar.markdown(f"<p style='font-size:12px;'>{tcp_status}</p>", unsafe_allow_html=True)
+
 if st.sidebar.button("🔍 Buscar Peers"):
-    engine.discovery.force_discover()
-    st.sidebar.success("Búsqueda de peers forzada")
+    with st.sidebar.status("Buscando peers..."):
+        engine.discovery.force_discover()
+        st.sidebar.success("Búsqueda de peers completada")
 
 # 5️⃣ Construir lista de peers y mappings
-now = datetime.utcnow()
-OFFLINE_THRESHOLD = 20.0
+now = datetime.now(UTC)
 
 raw_peers = engine.discovery.get_peers()  # keys uid_bytes or uid_str → {'ip','last_seen'}
 
@@ -107,52 +121,84 @@ st.sidebar.subheader("Mensaje Global")
 msg_global = st.sidebar.text_area("Escribe tu mensaje global aquí:")
 if st.sidebar.button("Enviar Mensaje Global"):
     if msg_global:
-        try:
-            engine.messaging.send_all(msg_global.encode('utf-8'))
-            engine.history_store.append_message(
-                sender=user,
-                recipient="*global*",
-                message=msg_global,
-                timestamp=datetime.utcnow()
-            )
-            st.sidebar.success("Mensaje global enviado")
-        except Exception as e:
-            st.sidebar.error(f"Error: {e}")
+        with st.sidebar.status("Enviando mensaje global..."):
+            try:
+                engine.messaging.send_all(msg_global.encode('utf-8'))
+                engine.history_store.append_message(
+                    sender=user,
+                    recipient="*global*",
+                    message=msg_global,
+                    timestamp=datetime.now(UTC)
+                )
+                st.sidebar.success("Mensaje global enviado")
+            except Exception as e:
+                st.sidebar.error(f"Error al enviar mensaje global: {e}")
     else:
         st.sidebar.error("Por favor escribe algo antes de enviar")
 
 # 8️⃣ Envío de archivos (Sidebar)
 st.sidebar.subheader("Enviar Archivo")
 if peer_name:
-    uploaded = st.sidebar.file_uploader("Selecciona un archivo", key="file_uploader")
-    if uploaded is not None and st.sidebar.button("Enviar Archivo"):
-        try:
-            data = uploaded.read()
-            uid_bytes = reverse_map[peer_name]
-            engine.messaging.send_file(uid_bytes, data, uploaded.name)
-            engine.history_store.append_file(
-                sender=user,
-                recipient=peer_name,
-                filename=uploaded.name,
-                timestamp=datetime.utcnow()
-            )
-            st.sidebar.success(f"Archivo '{uploaded.name}' enviado")
-        except Exception as e:
-            st.sidebar.error(str(e))
+    uploaded = st.sidebar.file_uploader(
+        "Selecciona un archivo",
+        key="file_uploader",
+        help=f"Tamaño máximo: {MAX_UPLOAD_SIZE/1024/1024:.1f} MB"
+    )
+    
+    if uploaded is not None:
+        file_size = len(uploaded.getvalue())
+        if file_size > MAX_UPLOAD_SIZE:
+            st.sidebar.error(f"Archivo demasiado grande ({file_size/1024/1024:.1f} MB)")
+        elif st.sidebar.button("Enviar Archivo"):
+            with st.sidebar.status(f"Enviando archivo {uploaded.name}...") as status:
+                try:
+                    data = uploaded.getvalue()
+                    uid_bytes = reverse_map[peer_name]
+                    
+                    status.update(label="Estableciendo conexión TCP...")
+                    engine.messaging.send_file(uid_bytes, data, uploaded.name)
+                    
+                    engine.history_store.append_file(
+                        sender=user,
+                        recipient=peer_name,
+                        filename=uploaded.name,
+                        timestamp=datetime.now(UTC)
+                    )
+                    st.sidebar.success(f"Archivo '{uploaded.name}' enviado correctamente")
+                except ConnectionError as e:
+                    st.sidebar.error(f"Error de conexión: {e}")
+                except TimeoutError as e:
+                    st.sidebar.error(f"Timeout al enviar archivo: {e}")
+                except Exception as e:
+                    st.sidebar.error(f"Error al enviar archivo: {e}")
 else:
     st.sidebar.info("Selecciona un peer para enviar archivos")
 
 # 9️⃣ Área principal de chat
+st.header("Chat")
+
+# 9.1) Mostrar mensajes globales siempre
+st.subheader("Mensajes Globales")
+global_msgs = engine.history_store.get_conversation("*global*")
+for e in global_msgs:
+    is_me = (e['sender'] == user)
+    left, right = st.columns([3, 3])
+    if is_me:
+        with right, st.chat_message("user"):
+            st.write(f"[Global] {e['message']}")
+    else:
+        with left, st.chat_message(e['sender']):
+            st.write(f"[Global] {e['message']}")
+
+# 9.2) Mostrar conversación privada si hay peer seleccionado
 if peer_name:
-    st.header(f"Chateando con: {peer_name}")
-
-    # 9.1) Combinar privados + globales
+    st.subheader(f"Chat con {peer_name}")
     private = engine.history_store.get_conversation(peer_name)
-    global_msgs = engine.history_store.get_conversation("*global*")
-    conv = sorted(private + global_msgs, key=lambda e: e['timestamp'])
-
-    # 9.2) Mostrar con st.chat_message en dos columnas
-    for e in conv:
+    
+    # Filtrar mensajes globales que ya mostramos arriba
+    private = [msg for msg in private if msg.get('recipient') != "*global*"]
+    
+    for e in private:
         is_me = (e['sender'] == user)
         left, right = st.columns([3, 3])
         if is_me:
@@ -161,12 +207,17 @@ if peer_name:
                     st.write(e['message'])
                 else:
                     st.write(f"[Archivo] {e['filename']}")
+                    # Mostrar estado de transferencia si es reciente
+                    if (now - e['timestamp']).total_seconds() < 30:
+                        st.caption("✅ Transferido por TCP")
         else:
             with left, st.chat_message(e['sender']):
                 if e['type'] == 'message':
                     st.write(e['message'])
                 else:
                     st.write(f"[Archivo] {e['filename']}")
+                    if (now - e['timestamp']).total_seconds() < 30:
+                        st.caption("✅ Transferido por TCP")
 
     # 9.3) Enviar mensaje de texto
     txt = st.chat_input("Escribe tu mensaje...")
@@ -182,13 +233,17 @@ if peer_name:
                 sender=user,
                 recipient=peer_name,
                 message=m,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             )
             left, right = st.columns([3, 3])
             with right, st.chat_message("user"):
                 st.write(m)
+        except ConnectionError as e:
+            st.error(f"Error de conexión: {e}")
+        except TimeoutError as e:
+            st.error(f"Timeout al enviar mensaje: {e}")
         except Exception as e:
-            st.error(str(e))
+            st.error(f"Error al enviar mensaje: {e}")
         finally:
             del st.session_state["__msg_pending__"]
 

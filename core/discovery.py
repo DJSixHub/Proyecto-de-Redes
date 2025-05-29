@@ -3,7 +3,8 @@
 import socket
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, UTC
+import ipaddress
 
 from core.protocol import (
     UDP_PORT,
@@ -38,8 +39,14 @@ class Discovery:
         # Determinar IP principal y todas las IPs locales
         hostname  = socket.gethostname()
         all_addrs = socket.gethostbyname_ex(hostname)[2]
-        # Elegimos la primera que no sea loopback como `local_ip`
-        self.local_ip  = next((ip for ip in all_addrs if not ip.startswith("127.")), all_addrs[0])
+        
+        # Primero intentar encontrar una IP en la subred 192.168.1.x
+        self.local_ip = next(
+            (ip for ip in all_addrs if ip.startswith("192.168.1.")),
+            next((ip for ip in all_addrs if not ip.startswith("127.")), all_addrs[0])
+        )
+        print(f"IP seleccionada para broadcast: {self.local_ip}")
+        
         # Conjunto de todas las IPs de la máquina, incluyendo loopback
         self.local_ips = set(all_addrs) | {"127.0.0.1"}
 
@@ -50,11 +57,49 @@ class Discovery:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.sock.bind(('', UDP_PORT))
+        
+        # Hacer bind específicamente a la IP local que queremos usar
+        try:
+            self.sock.bind((self.local_ip, UDP_PORT))
+            print(f"Socket UDP vinculado a {self.local_ip}")
+        except Exception as e:
+            print(f"Error al vincular a {self.local_ip}, intentando con 0.0.0.0: {e}")
+            self.sock.bind(('0.0.0.0', UDP_PORT))
 
         threading.Thread(target=self._broadcast_loop, daemon=True).start()
         if self.peers_store:
             threading.Thread(target=self._persist_loop, daemon=True).start()
+
+    def _get_network_interfaces(self):
+        """Obtiene todas las interfaces de red con sus IPs y máscaras"""
+        interfaces = []
+        
+        try:
+            import subprocess
+            output = subprocess.check_output('ipconfig /all', shell=True).decode('latin1')
+            
+            current_if = None
+            for line in output.split('\n'):
+                line = line.strip()
+                
+                if not line:
+                    continue
+                    
+                if not line.startswith(' '):
+                    current_if = {'name': line, 'ip': None, 'mask': None}
+                    continue
+                    
+                if 'IPv4' in line and 'Address' in line:
+                    try:
+                        current_if['ip'] = line.split(':')[-1].strip()
+                        interfaces.append(current_if)
+                    except:
+                        pass
+                        
+        except Exception as e:
+            print(f"Error obteniendo interfaces: {e}")
+            
+        return interfaces
 
     def _broadcast_loop(self):
         while True:
@@ -62,12 +107,18 @@ class Discovery:
             time.sleep(self.broadcast_interval)
 
     def _do_broadcast(self):
+        """Envía un Echo-Request (op_code=0) a la dirección de broadcast."""
         pkt = pack_header(
             user_from=self.user_id,
             user_to=BROADCAST_UID,
             op_code=0
         )
-        self.sock.sendto(pkt, ('<broadcast>', UDP_PORT))
+        try:
+            # Enviar a la dirección de broadcast desde la IP local específica
+            self.sock.sendto(pkt, ('255.255.255.255', UDP_PORT))
+            print(f"Broadcast enviado desde {self.local_ip} con ID {self.raw_id}")
+        except Exception as e:
+            print(f"Error al enviar broadcast: {e}")
 
     def force_discover(self):
         """Envía inmediatamente un broadcast de descubrimiento."""
@@ -80,7 +131,7 @@ class Discovery:
         """
         while True:
             time.sleep(5)
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             to_save = {}
             for uid, info in self.peers.items():
                 ip = info['ip']
@@ -88,12 +139,19 @@ class Discovery:
                     continue
                 age = (now - info['last_seen']).total_seconds()
                 status = 'connected' if age < OFFLINE_THRESHOLD else 'disconnected'
-                to_save[uid] = {
+                
+                # Si uid es bytes, convertirlo a string, si ya es string usarlo directamente
+                key = uid.decode('utf-8', errors='ignore') if isinstance(uid, bytes) else uid
+                
+                to_save[key] = {
                     'ip':         ip,
                     'last_seen':  info['last_seen'],
                     'status':     status
                 }
-            self.peers_store.save(to_save)
+            try:
+                self.peers_store.save(to_save)
+            except Exception as e:
+                print(f"Error guardando peers: {e}")
 
     def handle_echo(self, data: bytes, addr):
         """
@@ -102,53 +160,73 @@ class Discovery:
         - Responde Echo-Reply.
         - Registra o actualiza el peer, eliminando antiguos UID de la misma IP.
         """
-        hdr      = unpack_header(data[:HEADER_SIZE])
-        raw_id   = hdr['user_from']                    # bytes sin padding
-        raw_peer = raw_id.ljust(20, b'\x00')           # padded 20 bytes
-        peer_ip  = addr[0]
+        try:
+            hdr      = unpack_header(data[:HEADER_SIZE])
+            raw_id   = hdr['user_from']                    # bytes sin padding
+            raw_peer = raw_id.ljust(20, b'\x00')           # padded 20 bytes
+            peer_ip  = addr[0]
 
-        # Para evitar descubrirnos a nosotros mismos comparamos el trimmed
-        if peer_ip in self.local_ips or raw_id == self.raw_id:
-            return
+            print(f"Echo recibido de {peer_ip} con ID {raw_id}")
 
-        # Responder
-        self.sock.sendto(pack_response(0, self.user_id), addr)
+            # Para evitar descubrirnos a nosotros mismos comparamos el trimmed
+            if peer_ip in self.local_ips or raw_id == self.raw_id:
+                print(f"Ignorando echo de IP local o self: {peer_ip}")
+                return
 
-        # Eliminar UID previos para esta IP
-        for uid in list(self.peers):
-            if self.peers[uid]['ip'] == peer_ip and uid != raw_peer:
-                del self.peers[uid]
+            # Responder con Echo-Reply
+            try:
+                resp = pack_response(0, self.user_id)
+                self.sock.sendto(resp, addr)
+                print(f"Respuesta echo enviada a {peer_ip}")
+            except Exception as e:
+                print(f"Error al enviar respuesta echo: {e}")
+                return
 
-        # Registrar/actualizar
-        self.peers[raw_peer] = {
-            'ip':        peer_ip,
-            'last_seen': datetime.utcnow()
-        }
+            # Eliminar UID previos para esta IP
+            for uid in list(self.peers):
+                if self.peers[uid]['ip'] == peer_ip and uid != raw_peer:
+                    del self.peers[uid]
+
+            # Registrar/actualizar
+            self.peers[raw_peer] = {
+                'ip':        peer_ip,
+                'last_seen': datetime.now(UTC)
+            }
+            print(f"Peer actualizado: {peer_ip}")
+        except Exception as e:
+            print(f"Error procesando echo: {e}")
 
     def handle_response(self, data: bytes, addr):
         """
         Procesa un Echo-Reply (RESPONSE_FMT):
         - Igual que handle_echo, pero desempaquetando RESPONSE_FMT.
         """
-        resp     = unpack_response(data[:RESPONSE_SIZE])
-        resp_id  = resp['responder']                   # bytes sin padding
-        raw_peer = resp_id.ljust(20, b'\x00')          # padded 20 bytes
-        peer_ip  = addr[0]
+        try:
+            resp     = unpack_response(data[:RESPONSE_SIZE])
+            resp_id  = resp['responder']                   # bytes sin padding
+            raw_peer = resp_id.ljust(20, b'\x00')          # padded 20 bytes
+            peer_ip  = addr[0]
 
-        # Comparamos trimmed para saltarnos nuestro propio id
-        if resp['status'] != 0 or peer_ip in self.local_ips or resp_id == self.raw_id:
-            return
+            print(f"Respuesta recibida de {peer_ip} con ID {resp_id}")
 
-        # Eliminar UID previos para esta IP
-        for uid in list(self.peers):
-            if self.peers[uid]['ip'] == peer_ip and uid != raw_peer:
-                del self.peers[uid]
+            # Comparamos trimmed para saltarnos nuestro propio id
+            if resp['status'] != 0 or peer_ip in self.local_ips or resp_id == self.raw_id:
+                print(f"Ignorando respuesta de IP local o self: {peer_ip}")
+                return
 
-        # Registrar/actualizar
-        self.peers[raw_peer] = {
-            'ip':        peer_ip,
-            'last_seen': datetime.utcnow()
-        }
+            # Eliminar UID previos para esta IP
+            for uid in list(self.peers):
+                if self.peers[uid]['ip'] == peer_ip and uid != raw_peer:
+                    del self.peers[uid]
+
+            # Registrar/actualizar
+            self.peers[raw_peer] = {
+                'ip':        peer_ip,
+                'last_seen': datetime.now(UTC)
+            }
+            print(f"Peer actualizado desde respuesta: {peer_ip}")
+        except Exception as e:
+            print(f"Error procesando respuesta: {e}")
 
     def get_peers(self) -> dict:
         """
