@@ -1,9 +1,8 @@
 # core/messaging.py
 
-# Este archivo implementa el sistema de mensajería usando el protocolo LCP (Local Chat Protocol).
-# El flujo de trabajo consiste en manejar la comunicación entre peers, incluyendo mensajes de texto
-# y transferencia de archivos. Utiliza UDP para mensajes de control y TCP para transferencia de
-# archivos. El sistema maneja reintentos, timeouts y confirmaciones para garantizar la entrega.
+# Sistema de mensajería usando protocolo LCP (Local Chat Protocol)
+# Gestiona comunicación entre peers: mensajes UDP y transferencia de archivos TCP
+# Incluye manejo de reintentos, timeouts y confirmaciones
 
 import threading
 import socket
@@ -31,20 +30,12 @@ from core.protocol import (
     USER_ID_SIZE
 )
 
-# Clase principal para el manejo de mensajería entre peers
-# Esta clase es fundamental porque:
-# 1. Implementa el protocolo LCP para comunicación
-# 2. Maneja tanto mensajes de texto como archivos
-# 3. Garantiza la entrega confiable de mensajes
+# Gestiona mensajería entre peers mediante protocolo LCP
+# Maneja mensajes/archivos con entrega confiable
 class Messaging:
     # Inicializa el sistema de mensajería
-    # Parámetros:
-    # - user_id: Identificador único del usuario
-    # - discovery: Módulo de descubrimiento de peers
-    # - history_store: Almacenamiento de historial
     def __init__(self, user_id: bytes, discovery, history_store):
-        # Normalización del identificador de usuario
-        # Aseguramos exactamente 20 bytes con padding
+        # Normaliza ID a 20 bytes con padding
         if isinstance(user_id, str):
             user_id = user_id.encode('utf-8')
         self.raw_id = user_id.rstrip(b'\x00')[:USER_ID_SIZE]
@@ -59,32 +50,27 @@ class Messaging:
         self.sock.setblocking(True)
         self.sock.settimeout(5.0)  # Timeout estándar de 5 segundos
         
-        # Optimización de buffers para mejor rendimiento
-        # 256KB para envío y recepción
+        # Optimiza buffers (256KB)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
 
-        # Configuración del socket TCP para archivos
-        # Similar optimización de buffers que UDP
+        # Socket TCP para transferencia de archivos
         self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
         self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
         self.tcp_sock.bind(('0.0.0.0', TCP_PORT))
         self.tcp_sock.listen(5)
         
-        # Sistema de coordinación de confirmaciones (ACKs)
-        # Usa eventos threading para sincronización
-        self._acks = {}             # Mapeo de uid a evento de confirmación
+        # Sistema de confirmaciones (ACKs)
+        self._acks = {}             # Mapeo uid→evento
         self._acks_lock = threading.Lock()
         
-        # Gestión de IDs únicos para mensajes
-        # Usa un contador cíclico de 0-255
+        # IDs de mensajes (0-255)
         self._next_body_id = 0
         self._body_id_lock = threading.Lock()
         
-        # Control de transferencias de archivos pendientes
-        # Almacena headers temporalmente para validación
-        self._pending_headers = {}  # Mapeo de body_id a (header, timestamp)
+        # Control de transferencias pendientes
+        self._pending_headers = {}  # Mapeo body_id→(header,timestamp)
         self._pending_headers_lock = threading.Lock()
         
         # Cola de mensajes entrantes para procesamiento asíncrono

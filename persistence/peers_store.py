@@ -2,26 +2,18 @@ import json
 import os
 from datetime import datetime, UTC
 
-# Este archivo maneja la persistencia de la información de los peers (nodos) en el sistema.
-# El flujo de trabajo consiste en cargar/guardar información de peers desde/hacia un archivo JSON,
-# manejar la conversión de formatos de tiempo, y proporcionar utilidades para la codificación de
-# identificadores de peers. Los datos se almacenan con nombres legibles pero se convierten a
-# formato binario para la comunicación en red.
+# Maneja persistencia de información de peers en formato JSON
+# Convierte entre formatos legibles y binarios para almacenamiento y comunicación
+# Gestiona timestamps y codificación de identificadores
 
-# Clase principal para manejar el almacenamiento persistente de información de peers
-# Esta clase es fundamental para mantener un registro histórico de los peers conocidos
-# y sus últimas apariciones en la red
+# Almacena información de peers y sus últimas apariciones en la red
 class PeersStore:
-    # Inicializa el almacén de peers con la ruta al archivo JSON
-    # El archivo por defecto es 'peers.json' en el directorio actual
+    # Inicializa con ruta al archivo JSON de peers
     def __init__(self, path='peers.json'):
         self.path = path
 
-    # Carga y procesa la información de peers desde el archivo JSON
-    # Esta función es crítica porque:
-    # 1. Maneja la ausencia del archivo o corrupción de datos
-    # 2. Convierte timestamps ISO a objetos datetime
-    # 3. Asegura que todos los timestamps estén en UTC
+    # Carga peers desde JSON, convierte timestamps ISO a datetime UTC
+    # Maneja casos de archivo ausente o datos corruptos
     def load(self):
         if not os.path.exists(self.path):
             return {}

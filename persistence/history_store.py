@@ -1,22 +1,16 @@
-# Este archivo maneja el almacenamiento persistente del historial de mensajes y archivos intercambiados
-# entre usuarios. El flujo de trabajo consiste en almacenar cada interacción en un archivo JSON,
-# manteniendo un registro cronológico de todas las comunicaciones. Cada entrada incluye metadatos
-# como tipo (mensaje/archivo), remitente, destinatario y timestamp. Los timestamps se manejan
-# consistentemente en UTC para evitar problemas de zonas horarias.
+# Gestiona historial de mensajes y archivos intercambiados entre usuarios
+# Almacena cronológicamente cada interacción en JSON con metadatos
+# Utiliza timestamps UTC para consistencia temporal
 
 import os
 import json
 from datetime import datetime, UTC
 from typing import List, Dict, Any
 
-# Clase principal para gestionar el almacenamiento del historial de comunicaciones
-# Esta clase es fundamental para:
-# 1. Mantener un registro persistente de todas las interacciones
-# 2. Gestionar conversaciones privadas y globales
-# 3. Manejar tanto mensajes de texto como transferencias de archivos
+# Gestiona almacenamiento de historial de comunicaciones
+# Registra interacciones y permite acceso a conversaciones privadas/globales
 class HistoryStore:
-    # Inicializa el almacén de historial con la ruta al archivo JSON
-    # Crea el archivo y directorio si no existen para garantizar la persistencia
+    # Inicializa almacén con ruta al archivo JSON
     def __init__(self, filename: str = "history.json"):
         folder = os.path.dirname(os.path.abspath(__file__))
         self.path = os.path.join(folder, filename)
@@ -25,8 +19,7 @@ class HistoryStore:
             with open(self.path, 'w', encoding='utf-8') as f:
                 json.dump([], f)
 
-    # Método interno para agregar una nueva entrada al historial
-    # Maneja la conversión de timestamps y asegura la consistencia de los datos
+    # Agrega entrada al historial con normalización de timestamp
     def _append(self, entry: Dict[str, Any]):
         try:
             history = self.load_raw()

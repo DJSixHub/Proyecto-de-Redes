@@ -1,34 +1,29 @@
 # core/protocol.py
 
-# Este archivo implementa el protocolo LCP (Local Chat Protocol) para la comunicación entre peers.
-# El flujo de trabajo consiste en la serialización y deserialización de mensajes siguiendo un formato
-# específico de bytes. El protocolo define una estructura de cabecera fija de 100 bytes, seguida de
-# un cuerpo variable, y respuestas de 25 bytes. Cada campo tiene un tamaño y formato específico para
-# garantizar la compatibilidad entre peers.
+# Implementación del protocolo LCP (Local Chat Protocol)
+# Define serialización/deserialización de mensajes con cabecera de 100 bytes,
+# cuerpo variable y respuestas de 25 bytes para comunicación entre peers
 
 import struct
 
-# Configuración de puertos para la comunicación
-# Se usa el mismo puerto para UDP (descubrimiento) y TCP (mensajes)
-UDP_PORT = 9990
-TCP_PORT = 9990
+# Puertos para comunicación
+UDP_PORT = 9990  # Puerto para descubrimiento
+TCP_PORT = 9990  # Puerto para mensajes y archivos
 
-# Definición de tamaños de campos según la especificación del protocolo
-# Estos valores son constantes y críticos para la correcta serialización
-USER_ID_SIZE = 20          # Tamaño del identificador de usuario
-OP_CODE_SIZE = 1          # Tamaño del código de operación
-BODY_ID_SIZE = 1          # Tamaño del identificador de cuerpo
-BODY_LENGTH_SIZE = 8      # Tamaño del campo de longitud del cuerpo
-HEADER_RESERVED_SIZE = 50 # Tamaño del campo reservado en la cabecera
-RESPONSE_RESERVED_SIZE = 4 # Tamaño del campo reservado en la respuesta
+# Tamaños de campos del protocolo
+USER_ID_SIZE = 20         # ID de usuario
+OP_CODE_SIZE = 1          # Código de operación
+BODY_ID_SIZE = 1          # ID de cuerpo
+BODY_LENGTH_SIZE = 8      # Longitud de cuerpo
+HEADER_RESERVED_SIZE = 50 # Reservado cabecera
+RESPONSE_RESERVED_SIZE = 4 # Reservado respuesta
 
-# Cálculo del tamaño total de la cabecera (100 bytes)
-# La estructura es:
-# - UserIdFrom (20 bytes): Identificador del remitente
-# - UserIdTo (20 bytes): Identificador del destinatario
-# - OperationCode (1 byte): Tipo de operación
-# - BodyId (1 byte): Identificador del cuerpo
-# - BodyLength (8 bytes): Longitud del cuerpo
+# Estructura de cabecera (100 bytes):
+# - UserIdFrom (20B): ID remitente
+# - UserIdTo (20B): ID destinatario
+# - OperationCode (1B): Tipo operación
+# - BodyId (1B): ID cuerpo
+# - BodyLength (8B): Longitud cuerpo
 # - Reserved (50 bytes): Espacio reservado para futuras extensiones
 HEADER_SIZE = USER_ID_SIZE + USER_ID_SIZE + OP_CODE_SIZE + BODY_ID_SIZE + BODY_LENGTH_SIZE + HEADER_RESERVED_SIZE
 

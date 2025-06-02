@@ -1,7 +1,6 @@
-# Este archivo implementa la interfaz gráfica del sistema de chat usando Streamlit.
-# El flujo de trabajo consiste en manejar la interacción con el usuario, mostrar mensajes
-# y archivos, y coordinar las acciones con el motor principal del sistema. La interfaz
-# se actualiza automáticamente y mantiene el estado de la sesión.
+# Implementa interfaz gráfica del sistema de chat con Streamlit
+# Maneja interacción de usuario, visualización de mensajes y archivos
+# Se actualiza periódicamente y mantiene estado de sesión
 
 import os
 import sys
@@ -9,8 +8,7 @@ import streamlit as st
 from datetime import datetime, UTC
 from streamlit_autorefresh import st_autorefresh
 
-# Configuración del path para importaciones
-# Asegura acceso a los módulos core y persistence
+# Configuración de acceso a módulos del sistema
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
@@ -18,17 +16,12 @@ if PROJECT_ROOT not in sys.path:
 
 from core.engine import Engine
 
-# Configuración de constantes del sistema
-# Estos valores son críticos para:
-# 1. Determinar el estado de conexión de peers
-# 2. Limitar el tamaño de archivos
-# 3. Mantener la interfaz actualizada
-OFFLINE_THRESHOLD = 20.0  # Tiempo máximo sin respuesta (segundos)
-MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # Límite de tamaño de archivo (100 MB)
-REFRESH_INTERVAL = 3000  # Intervalo de actualización de UI (ms)
+# Constantes del sistema
+OFFLINE_THRESHOLD = 20.0               # Segundos para marcar peer desconectado
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024    # Límite archivo (100 MB)
+REFRESH_INTERVAL = 3000                # Intervalo UI (ms)
 
 # Sistema de autenticación
-# Maneja el ingreso del identificador de usuario
 # y mantiene la sesión activa
 if 'user_id' not in st.session_state or not st.session_state['user_id']:
     st.title("LCP Chat Interface")

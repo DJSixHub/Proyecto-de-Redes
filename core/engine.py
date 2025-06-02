@@ -1,7 +1,6 @@
-# Este archivo implementa el motor principal de la aplicación, orquestando todos los componentes.
-# El flujo de trabajo consiste en inicializar y coordinar los módulos de descubrimiento de peers,
-# mensajería y persistencia. Se encarga de cargar la información persistente de peers, filtrar
-# peers locales, y gestionar el ciclo de vida de los hilos de comunicación.
+# Motor principal que orquesta todos los componentes del sistema
+# Coordina descubrimiento de peers, mensajería y persistencia
+# Gestiona información de peers y ciclo de vida de los hilos
 
 import threading
 import os
@@ -18,16 +17,10 @@ from core.messaging import Messaging
 from persistence.peers_store import PeersStore
 from persistence.history_store import HistoryStore
 
-# Clase principal que coordina todos los componentes del sistema
-# Esta clase es fundamental porque:
-# 1. Inicializa y conecta todos los módulos
-# 2. Gestiona la persistencia de datos
-# 3. Maneja el ciclo de vida de los hilos
+# Coordina todos los componentes del sistema
+# Gestiona módulos, persistencia y ciclo de vida de hilos
 class Engine:
-    # Inicializa el motor con la configuración básica
-    # Parámetros:
-    # - user_id: Identificador único del usuario (20 bytes)
-    # - broadcast_interval: Intervalo de anuncio en la red
+    # Inicializa el motor con identificador de usuario e intervalo de broadcast
     def __init__(self,
                  user_id: bytes,
                  broadcast_interval: float = 1.0):
