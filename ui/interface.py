@@ -126,10 +126,24 @@ current_peers = [
     name for name, _, info in peers
     if (now - info['last_seen']).total_seconds() < OFFLINE_THRESHOLD
 ]
-previous_peers = [
-    name for name, _, info in peers
-    if (now - info['last_seen']).total_seconds() >= OFFLINE_THRESHOLD
-]
+
+# Obtenemos peers anteriores del historial para asegurar que podamos
+# acceder a conversaciones incluso con peers que ya no están en la lista actual
+history_entries = engine.history_store.load_raw()
+history_peers = set()
+for entry in history_entries:
+    if entry.get('sender') and entry.get('sender') != user:
+        history_peers.add(entry.get('sender'))
+    if entry.get('recipient') and entry.get('recipient') != "*global*" and entry.get('recipient') != user:
+        history_peers.add(entry.get('recipient'))
+
+# Combinamos los peers anteriores del estado actual con los del historial
+previous_peers = list(set(
+    [name for name, _, info in peers if (now - info['last_seen']).total_seconds() >= OFFLINE_THRESHOLD]
+    + list(history_peers)
+))
+# Eliminamos duplicados entre current_peers y previous_peers
+previous_peers = [p for p in previous_peers if p not in current_peers]
 
 # Interfaz de selección de peers
 # Esta sección es importante porque:
@@ -259,6 +273,8 @@ if peer_name:
     # Filtrado de mensajes
     # Excluye mensajes globales ya mostrados
     private = [msg for msg in private if msg.get('recipient') != "*global*"]
+    
+    # Nota: Los mensajes ya vienen ordenados por timestamp desde history_store.py
     
     # Visualización de mensajes y archivos
     # Con formato diferenciado por tipo y origen

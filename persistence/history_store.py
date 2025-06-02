@@ -109,17 +109,23 @@ class HistoryStore:
             ]
 
         # Filtrado de mensajes para conversaciones privadas
-        # Incluye tanto mensajes directos como globales relevantes
-        return [
+        # Incluye mensajes directos entre el usuario y el peer
+        # Importante: Filtramos por el nombre del peer, no por su IP
+        # para mantener el historial incluso si cambia la IP
+        filtered_messages = [
             item for item in history
             if (
-                # Mensajes privados con el peer
-                item.get('sender') == peer or 
-                item.get('recipient') == peer or
-                # Mensajes globales (excepto los míos)
-                (item.get('recipient') == "*global*" and item.get('sender') != peer)
+                # Mensajes enviados por el peer al usuario actual
+                (item.get('sender') == peer) or 
+                # Mensajes enviados al peer
+                (item.get('recipient') == peer)
             )
         ]
+        
+        # Ordenamos los mensajes por timestamp para mostrarlos cronológicamente
+        filtered_messages.sort(key=lambda x: x['timestamp'])
+        
+        return filtered_messages
 
     # Carga el historial completo sin procesar
     # Esta función es importante porque:

@@ -1398,5 +1398,82 @@
     "recipient": "Albert              ",
     "filename": "Proyecto Redes.zip",
     "timestamp": "2025-05-29T15:56:28.188713+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "Dirgo",
+    "filename": "archivo_20250602_003101_4.dat",
+    "timestamp": "2025-06-02T00:31:01.427899+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "Dirgo",
+    "filename": "archivo_20250602_003116_238.dat",
+    "timestamp": "2025-06-02T00:31:16.259367+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "Diego",
+    "filename": "archivo_20250602_003316_2.doc",
+    "timestamp": "2025-06-02T00:33:16.639982+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "Diego",
+    "filename": "archivo_20250602_003330_1.pdf",
+    "timestamp": "2025-06-02T00:33:30.295035+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Amalia              ",
+    "recipient": "*global*",
+    "message": "skafnhas hcasi hcrorasi cha hcasikhv alsegvalesiuhcgtlabiesuhctnltaisnchlSICHLBASCIGBASLBCUGFASUCG FSA",
+    "timestamp": "2025-06-02T00:33:52.602384+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diego",
+    "recipient": "Amalia              ",
+    "message": "Hola",
+    "timestamp": "2025-06-02T00:34:06.931660+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "Diego",
+    "recipient": "Amalia              ",
+    "filename": "Proyecto Redes.zip",
+    "timestamp": "2025-06-02T00:34:31.340095+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "Amalia              ",
+    "message": "hola",
+    "timestamp": "2025-06-02T03:20:23.765224+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Amalia              ",
+    "recipient": "Diegop",
+    "message": "KJKJBKJB",
+    "timestamp": "2025-06-02T03:20:32.235381+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "*global*",
+    "message": "as asfa",
+    "timestamp": "2025-06-02T03:20:35.632023+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "192.168.1.100",
+    "recipient": "Diegop",
+    "filename": "archivo_20250602_032048_71.pdf",
+    "timestamp": "2025-06-02T03:20:48.654899+00:00"
   }
 ]

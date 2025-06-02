@@ -581,14 +581,13 @@ class Messaging:
         # Función auxiliar para lectura exacta de bytes
         def recv_exact(n):
             data = bytearray()
-            i = 0
-            while i < n:
-                r = n - i
-                chunk = sock.recv(r)
+            remaining = n
+            while remaining > 0:
+                chunk = sock.recv(min(32768, remaining))  # Leer en chunks de máximo 32KB
                 if not chunk:
                     raise ConnectionError("Conexión cerrada durante recepción")
                 data.extend(chunk)
-                i += len(chunk)
+                remaining -= len(chunk)
             return bytes(data)
 
         try:
@@ -607,31 +606,14 @@ class Messaging:
                 del self._pending_headers[file_id]  # Limpiar header usado
 
             # Recepción del contenido del archivo
-            # Según protocolo: BodyLength es el tamaño exacto del archivo
-            body_len = hdr['body_len']  # Ya no restamos 8 bytes
+            body_len = hdr['body_len']
             if body_len <= 0:
                 print(f"Tamaño de archivo inválido: {body_len}")
                 sock.send(pack_response(2, self.user_id))
                 return
 
-            # Recepción por chunks para archivos grandes
-            body = bytearray()
-            chunk_size = 32768  # 32KB
-            received = 0
-            
             print(f"Iniciando recepción de {body_len} bytes...")
-            while received < body_len:
-                remaining = body_len - received
-                current_chunk = min(chunk_size, remaining)
-                chunk = recv_exact(current_chunk)
-                if not chunk:
-                    raise ConnectionError("Conexión cerrada durante recepción")
-                    body.extend(chunk)
-                received += len(chunk)
-                if received % (1024 * 1024) == 0:  # Reportar progreso cada 1MB
-                    print(f"Recibidos {received}/{body_len} bytes ({(received/body_len)*100:.1f}%)")
-
-            body = bytes(body)  # Convertir a bytes inmutables
+            body = recv_exact(body_len)  # Usar recv_exact para todo el archivo
             print(f"Recepción completa: {len(body)} bytes")
             
             # Detectar el tipo de archivo
@@ -644,7 +626,7 @@ class Messaging:
 
             # Generar nombre de archivo con la extensión correcta
             timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-            filename = f"archivo_{timestamp}_{file_id & 0xFF}.dat"
+            filename = f"archivo_{timestamp}_{file_id & 0xFF}{extension}"
             path = os.path.join(downloads_dir, filename)
             
             # Guardar el archivo
@@ -667,7 +649,6 @@ class Messaging:
         except Exception as e:
             print(f"Error en transferencia TCP: {e}")
             try:
-                # Notificación de error al remitente
                 sock.send(pack_response(2, self.user_id))  # Status 2 = Error
             except:
                 pass
