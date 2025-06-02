@@ -581,11 +581,14 @@ class Messaging:
         # Función auxiliar para lectura exacta de bytes
         def recv_exact(n):
             data = bytearray()
-            while len(data) < n:
-                chunk = sock.recv(n - len(data))
+            i = 0
+            while i < n:
+                r = n - i
+                chunk = sock.recv(r)
                 if not chunk:
                     raise ConnectionError("Conexión cerrada durante recepción")
                 data.extend(chunk)
+                i += len(chunk)
             return bytes(data)
 
         try:
@@ -623,14 +626,14 @@ class Messaging:
                 chunk = recv_exact(current_chunk)
                 if not chunk:
                     raise ConnectionError("Conexión cerrada durante recepción")
-                body.extend(chunk)
+                    body.extend(chunk)
                 received += len(chunk)
                 if received % (1024 * 1024) == 0:  # Reportar progreso cada 1MB
                     print(f"Recibidos {received}/{body_len} bytes ({(received/body_len)*100:.1f}%)")
 
             body = bytes(body)  # Convertir a bytes inmutables
             print(f"Recepción completa: {len(body)} bytes")
-
+            
             # Detectar el tipo de archivo
             extension = self._detect_file_type(body)
             print(f"Tipo de archivo detectado: {extension}")
@@ -641,9 +644,9 @@ class Messaging:
 
             # Generar nombre de archivo con la extensión correcta
             timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-            filename = f"archivo_{timestamp}_{file_id & 0xFF}{extension}"
+            filename = f"archivo_{timestamp}_{file_id & 0xFF}.dat"
             path = os.path.join(downloads_dir, filename)
-
+            
             # Guardar el archivo
             with open(path, 'wb') as f:
                 f.write(body)
@@ -652,7 +655,7 @@ class Messaging:
             # Enviar confirmación según protocolo
             sock.send(pack_response(0, self.user_id))
             print("ACK enviado")
-
+            
             # Registro en el historial de transferencias
             self.history_store.append_file(
                 sender=addr[0],
@@ -660,7 +663,7 @@ class Messaging:
                 filename=filename,
                 timestamp=datetime.now(UTC)
             )
-
+            
         except Exception as e:
             print(f"Error en transferencia TCP: {e}")
             try:

@@ -1,0 +1,829 @@
+\documentclass[12pt]{article}
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\title{Análisis Detallado del Flujo de Información\\Sistema de Chat LCP}
+\author{Documentación Técnica}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\tableofcontents
+
+\section{Introducción}
+Este documento describe detalladamente el flujo de información del sistema de chat LCP (Local Chat Protocol), explicando cada componente, su funcionamiento y las razones detrás de las decisiones de implementación. El análisis incluye una descripción línea por línea de cada proceso importante.
+
+\section{Inicio del Sistema}
+\subsection{Punto de Entrada (interfaz.py)}
+El sistema comienza su ejecución en \texttt{interfaz.py}. El flujo detallado es:
+
+\begin{enumerate}
+    \item Configuración inicial:
+    \begin{itemize}
+        \item Se importan las bibliotecas necesarias (os, sys, streamlit, datetime)
+        \item Se configura el path del proyecto agregando el directorio raíz al sys.path
+        \item Se definen constantes críticas:
+        \begin{itemize}
+            \item \texttt{OFFLINE\_THRESHOLD = 20.0} - Tiempo en segundos para marcar un peer como desconectado
+            \item \texttt{MAX\_UPLOAD\_SIZE = 100 * 1024 * 1024} - Límite de 100MB para archivos
+            \item \texttt{REFRESH\_INTERVAL = 3000} - Actualización de UI cada 3 segundos
+        \end{itemize}
+    \end{itemize}
+
+    \item Sistema de autenticación:
+    \begin{itemize}
+        \item Se verifica si existe \texttt{user\_id} en \texttt{st.session\_state}
+        \item Si no existe:
+        \begin{itemize}
+            \item Se crea un formulario con \texttt{st.form("login\_form")}
+            \item Se agrega campo de texto con \texttt{st.text\_input} limitado a 20 caracteres
+            \item Al enviar el formulario:
+            \begin{itemize}
+                \item Se valida que el campo no esté vacío
+                \item Se almacena el ID en \texttt{st.session\_state['user\_id']}
+                \item Se detiene la ejecución con \texttt{st.stop()} para forzar recarga
+            \end{itemize}
+        \end{itemize}
+    \end{itemize}
+
+    \item Inicialización del motor:
+    \begin{itemize}
+        \item Se verifica si existe \texttt{engine} en \texttt{st.session\_state}
+        \item Si no existe:
+        \begin{itemize}
+            \item Se crea instancia de \texttt{Engine} con el user\_id
+            \item Se llama al método \texttt{start()} para iniciar hilos
+            \item Se almacena en \texttt{st.session\_state['engine']}
+            \item Si hay error, se muestra con \texttt{st.error} y se detiene
+        \end{itemize}
+        \item Si existe, se recupera la instancia existente
+    \end{itemize}
+
+    \item Configuración de actualización automática:
+    \begin{itemize}
+        \item Se configura \texttt{st\_autorefresh} con intervalo de 3000ms
+        \item Esto garantiza que la UI se mantenga sincronizada con el estado del sistema
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Panel Lateral de Control}
+El panel lateral se construye así:
+
+\begin{enumerate}
+    \item Información de usuario:
+    \begin{itemize}
+        \item Se muestra el ID con \texttt{st.sidebar.title}
+        \item Se muestra la IP local con formato HTML y color gris
+        \item Se indica el estado TCP con emoji (🟢/🔴)
+    \end{itemize}
+
+    \item Búsqueda de peers:
+    \begin{itemize}
+        \item Se agrega botón "🔍 Buscar Peers"
+        \item Al hacer clic:
+        \begin{itemize}
+            \item Se muestra indicador de estado
+            \item Se llama a \texttt{engine.discovery.force\_discover()}
+            \item Se muestra confirmación de éxito
+        \end{itemize}
+    \end{itemize}
+
+    \item Gestión de peers:
+    \begin{itemize}
+        \item Se obtiene timestamp actual en UTC
+        \item Se recuperan peers del discovery con \texttt{get\_peers()}
+        \item Para cada peer:
+        \begin{itemize}
+            \item Se normaliza el ID (elimina padding nulo)
+            \item Se convierte entre formatos bytes/string según necesidad
+            \item Se mantiene un mapeo inverso para búsquedas rápidas
+        \end{itemize}
+        \item Se clasifican en actuales/anteriores según \texttt{OFFLINE\_THRESHOLD}
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Inicialización del Motor (engine.py)}
+El motor es el componente central que coordina todos los módulos. El proceso detallado es:
+
+\begin{enumerate}
+    \item Constructor de Engine:
+    \begin{itemize}
+        \item Recibe parámetros:
+        \begin{itemize}
+            \item \texttt{user\_id}: ID del usuario (string o bytes)
+            \item \texttt{broadcast\_interval}: Intervalo de anuncio (default 1.0s)
+        \end{itemize}
+        \item Normalización del ID:
+        \begin{itemize}
+            \item Si es string, se convierte a bytes con UTF-8
+            \item Se trunca o rellena para tener exactamente 20 bytes
+            \item Se usa \texttt{ljust(20, b'\textbackslash x00')} para padding con nulos
+        \end{itemize}
+    \end{itemize}
+
+    \item Inicialización de componentes:
+    \begin{itemize}
+        \item \texttt{PeersStore}:
+        \begin{itemize}
+            \item Se crea instancia sin parámetros
+            \item Maneja archivo JSON para persistencia
+            \item Se usa para almacenar información de peers
+        \end{itemize}
+        \item \texttt{HistoryStore}:
+        \begin{itemize}
+            \item Se crea instancia sin parámetros
+            \item También usa archivo JSON
+            \item Almacena historial de mensajes y archivos
+        \end{itemize}
+    \end{itemize}
+
+    \item Configuración del Discovery:
+    \begin{itemize}
+        \item Se crea instancia con:
+        \begin{itemize}
+            \item \texttt{user\_id}: ID normalizado
+            \item \texttt{broadcast\_interval}: Intervalo configurado
+            \item \texttt{peers\_store}: Instancia de PeersStore
+        \end{itemize}
+        \item Carga de peers previos:
+        \begin{itemize}
+            \item Llama a \texttt{peers\_store.load()}
+            \item Obtiene IP local del discovery
+            \item Filtra peers con la misma IP local
+            \item Actualiza diccionario \texttt{discovery.peers}
+        \end{itemize}
+    \end{itemize}
+
+    \item Configuración de Mensajería:
+    \begin{itemize}
+        \item Se crea instancia con:
+        \begin{itemize}
+            \item \texttt{user\_id}: ID normalizado
+            \item \texttt{discovery}: Instancia de Discovery
+            \item \texttt{history\_store}: Instancia de HistoryStore
+        \end{itemize}
+    \end{itemize}
+
+    \item Método start():
+    \begin{itemize}
+        \item Crea hilo para \texttt{messaging.recv\_loop}
+        \item Configura como daemon (termina con programa principal)
+        \item Inicia el hilo para escuchar mensajes
+    \end{itemize}
+\end{enumerate}
+
+\section{Sistema de Descubrimiento (discovery.py)}
+\subsection{Inicialización del Descubrimiento}
+El proceso detallado de inicialización incluye:
+
+\begin{enumerate}
+    \item Constructor de Discovery:
+    \begin{itemize}
+        \item Parámetros recibidos:
+        \begin{itemize}
+            \item \texttt{user\_id}: ID en bytes (20 bytes)
+            \item \texttt{broadcast\_interval}: Frecuencia de anuncios
+            \item \texttt{peers\_store}: Almacenamiento persistente
+        \end{itemize}
+        \item Preparación de IDs:
+        \begin{itemize}
+            \item \texttt{raw\_id = user\_id.rstrip(b'\textbackslash x00')} - Elimina padding
+            \item \texttt{user\_id = raw\_id.ljust(20, b'\textbackslash x00')} - Asegura 20 bytes
+        \end{itemize}
+    \end{itemize}
+
+    \item Detección de IPs:
+    \begin{itemize}
+        \item Obtiene hostname con \texttt{socket.gethostname()}
+        \item Lista todas las IPs con \texttt{socket.gethostbyname\_ex()}
+        \item Selección de IP principal:
+        \begin{enumerate}
+            \item Busca primero IPs que empiecen con "192.168.1."
+            \item Si no hay, busca cualquier IP no-loopback
+            \item Como último recurso, usa la primera IP disponible
+        \end{enumerate}
+        \item Registra todas las IPs locales incluyendo 127.0.0.1
+    \end{itemize}
+
+    \item Configuración de Socket UDP:
+    \begin{itemize}
+        \item Crea socket UDP:
+        \begin{verbatim}
+socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        \end{verbatim}
+        \item Configura opciones:
+        \begin{itemize}
+            \item SO\_REUSEADDR = 1 (permite reutilizar puerto)
+            \item SO\_BROADCAST = 1 (habilita broadcast)
+        \end{itemize}
+        \item Intenta bind:
+        \begin{enumerate}
+            \item Primero a IP local seleccionada
+            \item Si falla, fallback a "0.0.0.0"
+        \end{enumerate}
+    \end{itemize}
+
+    \item Inicio de Hilos:
+    \begin{itemize}
+        \item Broadcast Loop:
+        \begin{itemize}
+            \item Thread daemon para \texttt{\_broadcast\_loop}
+            \item Envía Echo-Request periódicamente
+        \end{itemize}
+        \item Persist Loop (si hay peers\_store):
+        \begin{itemize}
+            \item Thread daemon para \texttt{\_persist\_loop}
+            \item Guarda estado de peers cada 5 segundos
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+\section{Sistema de Mensajería (messaging.py)}
+\subsection{Inicialización de Mensajería}
+El módulo de mensajería implementa la comunicación entre peers. El proceso detallado es:
+
+\begin{enumerate}
+    \item Constructor de Messaging:
+    \begin{itemize}
+        \item Parámetros recibidos:
+        \begin{itemize}
+            \item \texttt{user\_id}: ID en bytes o string
+            \item \texttt{discovery}: Instancia de Discovery
+            \item \texttt{history\_store}: Almacenamiento de historial
+        \end{itemize}
+        \item Normalización del ID:
+        \begin{itemize}
+            \item Conversión a bytes si es string
+            \item \texttt{raw\_id = user\_id.rstrip(b'\textbackslash x00')[:USER\_ID\_SIZE]}
+            \item \texttt{user\_id = raw\_id.ljust(USER\_ID\_SIZE, b'\textbackslash x00')}
+        \end{itemize}
+    \end{itemize}
+
+    \item Configuración de Socket UDP:
+    \begin{itemize}
+        \item Reutiliza socket del discovery
+        \item Configuración de socket:
+        \begin{itemize}
+            \item \texttt{setblocking(True)} - Operaciones síncronas
+            \item \texttt{settimeout(5.0)} - Timeout de 5 segundos
+            \item Buffer de recepción: 256KB (\texttt{SO\_RCVBUF = 262144})
+            \item Buffer de envío: 256KB (\texttt{SO\_SNDBUF = 262144})
+        \end{itemize}
+    \end{itemize}
+
+    \item Configuración de Socket TCP:
+    \begin{itemize}
+        \item Nuevo socket TCP:
+        \begin{verbatim}
+socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        \end{verbatim}
+        \item Configuración:
+        \begin{itemize}
+            \item Buffers de 256KB (igual que UDP)
+            \item Bind a todas las interfaces (0.0.0.0)
+            \item Puerto TCP fijo (definido en protocol.py)
+            \item Máximo 5 conexiones en cola (\texttt{listen(5)})
+        \end{itemize}
+    \end{itemize}
+
+    \item Estructuras de Control:
+    \begin{itemize}
+        \item Sistema de ACKs:
+        \begin{itemize}
+            \item \texttt{\_acks}: Diccionario de \{uid: threading.Event\}
+            \item \texttt{\_acks\_lock}: Lock para sincronización
+        \end{itemize}
+        \item IDs de mensajes:
+        \begin{itemize}
+            \item \texttt{\_next\_body\_id}: Contador 0-255
+            \item \texttt{\_body\_id\_lock}: Lock para generación de IDs
+        \end{itemize}
+        \item Headers pendientes:
+        \begin{itemize}
+            \item \texttt{\_pending\_headers}: Mapeo de \{body\_id: (header, timestamp)\}
+            \item \texttt{\_pending\_headers\_lock}: Lock para acceso
+        \end{itemize}
+        \item Cola de mensajes:
+        \begin{itemize}
+            \item \texttt{\_message\_queue}: Cola thread-safe
+            \item Usada para procesamiento asíncrono
+        \end{itemize}
+    \end{itemize}
+
+    \item Inicio de Hilos de Mantenimiento:
+    \begin{itemize}
+        \item Limpieza de headers:
+        \begin{itemize}
+            \item Thread para \texttt{\_clean\_pending\_headers}
+            \item Elimina headers más antiguos de 30 segundos
+            \item Se ejecuta cada 5 segundos
+        \end{itemize}
+        \item Procesamiento de mensajes:
+        \begin{itemize}
+            \item Thread para \texttt{\_process\_messages}
+            \item Consume mensajes de la cola
+            \item Maneja errores individualmente
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Envío de Mensajes}
+El proceso detallado de envío de mensajes incluye:
+
+\begin{enumerate}
+    \item Método send():
+    \begin{itemize}
+        \item Parámetros:
+        \begin{itemize}
+            \item \texttt{recipient}: ID del destinatario (bytes)
+            \item \texttt{message}: Contenido del mensaje (bytes)
+            \item \texttt{timeout}: Tiempo máximo de espera (default 5s)
+        \end{itemize}
+    \end{itemize}
+
+    \item Preparación del mensaje:
+    \begin{itemize}
+        \item Generación de ID:
+        \begin{itemize}
+            \item Obtiene siguiente \texttt{body\_id} (0-255)
+            \item Usa lock para thread-safety
+        \end{itemize}
+        \item Empaquetado:
+        \begin{itemize}
+            \item Empaqueta cuerpo con \texttt{pack\_message\_body}
+            \item Incluye \texttt{body\_id} y mensaje
+        \end{itemize}
+    \end{itemize}
+
+    \item Envío del header:
+    \begin{itemize}
+        \item Construcción:
+        \begin{itemize}
+            \item \texttt{user\_from}: ID local con padding
+            \item \texttt{user\_to}: ID destino con padding
+            \item \texttt{op\_code}: OP\_MESSAGE
+            \item \texttt{body\_id}: ID generado
+            \item \texttt{body\_len}: Longitud del cuerpo
+        \end{itemize}
+        \item Proceso de envío:
+        \begin{itemize}
+            \item Llama a \texttt{\_send\_and\_wait}
+            \item Espera ACK con timeout
+            \item Reintenta hasta 3 veces
+        \end{itemize}
+    \end{itemize}
+
+    \item Envío del cuerpo:
+    \begin{itemize}
+        \item Mismo proceso que header:
+        \begin{itemize}
+            \item \texttt{\_send\_and\_wait} con el cuerpo
+            \item Espera ACK con timeout
+            \item Reintenta hasta 3 veces
+        \end{itemize}
+        \item En caso de fallo:
+        \begin{itemize}
+            \item Intenta redescubrir peers
+            \item Propaga excepción si persiste
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Protocolo de Mensajería}
+El protocolo LCP define la estructura de comunicación:
+
+\begin{enumerate}
+    \item Header (50 bytes):
+    \begin{itemize}
+        \item user\_from (20 bytes): ID del remitente
+        \item user\_to (20 bytes): ID del destinatario
+        \item op\_code (1 byte): Tipo de operación
+        \item body\_id (1 byte): ID del mensaje/archivo
+        \item body\_len (8 bytes): Tamaño del cuerpo
+    \end{itemize}
+    \item Respuesta (25 bytes):
+    \begin{itemize}
+        \item status (1 byte): Código de estado
+        \item responder (20 bytes): ID del respondedor
+        \item Padding (4 bytes): Alineación
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Flujo de Mensajes de Texto}
+El envío de mensajes sigue este proceso:
+
+\begin{enumerate}
+    \item Preparación:
+    \begin{itemize}
+        \item Genera body\_id único (0-255)
+        \item Codifica mensaje en UTF-8
+        \item Empaqueta header con op\_code = OP\_MESSAGE
+    \end{itemize}
+    \item Envío con confirmación:
+    \begin{itemize}
+        \item Envía header y espera ACK
+        \item Envía cuerpo y espera ACK
+        \item Reintenta hasta 3 veces con espera exponencial
+    \end{itemize}
+    \item Procesamiento de recepción:
+    \begin{itemize}
+        \item Valida header y tamaño
+        \item Envía ACK al remitente
+        \item Decodifica mensaje y actualiza historial
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Transferencia de Archivos}
+El proceso detallado de transferencia de archivos incluye:
+
+\begin{enumerate}
+    \item Método send\_file():
+    \begin{itemize}
+        \item Parámetros:
+        \begin{itemize}
+            \item \texttt{recipient}: ID del destinatario (bytes)
+            \item \texttt{file\_bytes}: Contenido del archivo
+            \item \texttt{filename}: Nombre del archivo
+            \item \texttt{timeout}: Tiempo máximo de espera
+        \end{itemize}
+        \item Validaciones iniciales:
+        \begin{itemize}
+            \item Verifica existencia del peer en discovery
+            \item Obtiene información de IP del peer
+        \end{itemize}
+    \end{itemize}
+
+    \item Fase UDP (Control):
+    \begin{itemize}
+        \item Preparación:
+        \begin{itemize}
+            \item Genera \texttt{body\_id} único
+            \item Construye header con \texttt{op\_code = OP\_FILE}
+            \item \texttt{body\_len} es el tamaño total del archivo
+        \end{itemize}
+        \item Envío del header:
+        \begin{itemize}
+            \item Usa \texttt{\_send\_and\_wait} con timeout
+            \item Espera ACK del receptor
+            \item Pausa 0.5s para sincronización
+        \end{itemize}
+    \end{itemize}
+
+    \item Fase TCP (Datos):
+    \begin{itemize}
+        \item Establecimiento de conexión:
+        \begin{itemize}
+            \item Crea nuevo socket TCP
+            \item Configura buffer de envío (256KB)
+            \item Conecta a IP:puerto del receptor
+        \end{itemize}
+        \item Envío de identificador:
+        \begin{itemize}
+            \item Convierte \texttt{body\_id} a 8 bytes (big-endian)
+            \item Envía bytes del identificador
+        \end{itemize}
+        \item Transferencia de datos:
+        \begin{itemize}
+            \item Divide archivo en chunks de 32KB
+            \item Para cada chunk:
+            \begin{itemize}
+                \item Envía datos con \texttt{sock.send}
+                \item Verifica bytes enviados
+                \item Actualiza contador de progreso
+            \end{itemize}
+        \end{itemize}
+        \item Finalización:
+        \begin{itemize}
+            \item \texttt{shutdown(SHUT\_WR)} para indicar fin
+            \item Espera ACK final (5s timeout)
+            \item Verifica estado en respuesta
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Recepción y Procesamiento}
+El sistema de recepción opera en varios niveles:
+
+\begin{enumerate}
+    \item Bucle Principal (recv\_loop):
+    \begin{itemize}
+        \item Inicia thread TCP separado
+        \item Bucle infinito para UDP:
+        \begin{itemize}
+            \item Recibe datos con buffer de 4KB
+            \item Valida tamaño mínimo del paquete
+            \item Clasifica tipo de mensaje
+        \end{itemize}
+    \end{itemize}
+
+    \item Procesamiento de ACKs:
+    \begin{itemize}
+        \item Verifica tamaño (25 bytes)
+        \item Desempaqueta con \texttt{unpack\_response}
+        \item Si status = 0:
+        \begin{itemize}
+            \item Busca evento en \texttt{\_acks}
+            \item Notifica al sender si corresponde
+        \end{itemize}
+        \item Pasa respuesta al discovery si no es ACK
+    \end{itemize}
+
+    \item Procesamiento de Headers:
+    \begin{itemize}
+        \item Valida tamaño (50 bytes)
+        \item Desempaqueta con \texttt{unpack\_header}
+        \item Verifica destinatario:
+        \begin{itemize}
+            \item Compara con ID local
+            \item Verifica si es broadcast
+            \item Normaliza IDs eliminando padding
+        \end{itemize}
+    \end{itemize}
+
+    \item Manejo de Mensajes:
+    \begin{itemize}
+        \item Para \texttt{OP\_MESSAGE}:
+        \begin{itemize}
+            \item Envía ACK del header
+            \item Espera cuerpo con timeout
+            \item Valida tamaño recibido
+            \item Envía ACK del cuerpo
+            \item Encola para procesamiento
+        \end{itemize}
+        \item Para \texttt{OP\_FILE}:
+        \begin{itemize}
+            \item Rechaza si es broadcast
+            \item Registra header en \texttt{\_pending\_headers}
+            \item Espera conexión TCP
+        \end{itemize}
+    \end{itemize}
+
+    \item Recepción TCP:
+    \begin{itemize}
+        \item Función auxiliar \texttt{recv\_exact}:
+        \begin{itemize}
+            \item Garantiza lectura completa
+            \item Acumula datos en bytearray
+            \item Maneja desconexiones
+        \end{itemize}
+        \item Proceso de recepción:
+        \begin{itemize}
+            \item Lee ID de archivo (8 bytes)
+            \item Valida contra headers pendientes
+            \item Recibe datos en chunks
+            \item Muestra progreso cada 1MB
+        \end{itemize}
+        \item Post-procesamiento:
+        \begin{itemize}
+            \item Detecta tipo de archivo
+            \item Sanitiza nombre
+            \item Guarda en directorio
+            \item Actualiza historial
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+\section{Sistema de Persistencia}
+\subsection{Almacenamiento de Peers (peers\_store.py)}
+El sistema de almacenamiento de peers opera así:
+
+\begin{enumerate}
+    \item Inicialización:
+    \begin{itemize}
+        \item Constructor:
+        \begin{itemize}
+            \item Recibe ruta de archivo JSON (opcional)
+            \item Crea directorio si no existe
+            \item Inicializa archivo vacío si es nuevo
+        \end{itemize}
+        \item Estructura del archivo:
+        \begin{itemize}
+            \item Lista de objetos peer
+            \item Cada peer tiene:
+            \begin{itemize}
+                \item ID (key primaria)
+                \item IP actual
+                \item Último timestamp visto
+                \item Estado (conectado/desconectado)
+            \end{itemize}
+        \end{itemize}
+    \end{itemize}
+
+    \item Operaciones de Lectura/Escritura:
+    \begin{itemize}
+        \item Método load():
+        \begin{itemize}
+            \item Lee archivo JSON completo
+            \item Convierte timestamps a objetos datetime
+            \item Normaliza IDs de peers
+            \item Retorna diccionario de peers
+        \end{itemize}
+        \item Método save():
+        \begin{itemize}
+            \item Recibe diccionario de peers
+            \item Convierte timestamps a ISO format
+            \item Escribe atomicamente usando archivo temporal
+            \item Maneja errores de escritura
+        \end{itemize}
+    \end{itemize}
+
+    \item Manejo de Concurrencia:
+    \begin{itemize}
+        \item Lock de archivo:
+        \begin{itemize}
+            \item Protege acceso al JSON
+            \item Previene corrupción
+            \item Maneja timeouts
+        \end{itemize}
+        \item Escritura atómica:
+        \begin{itemize}
+            \item Escribe a archivo temporal
+            \item Renombra al archivo final
+            \item Garantiza consistencia
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Historial de Mensajes (history\_store.py)}
+El almacenamiento de historial funciona así:
+
+\begin{enumerate}
+    \item Estructura de Datos:
+    \begin{itemize}
+        \item Archivo JSON principal:
+        \begin{itemize}
+            \item Lista de entradas de historial
+            \item Cada entrada contiene:
+            \begin{itemize}
+                \item Tipo (mensaje/archivo)
+                \item Remitente (ID)
+                \item Destinatario (ID o "*global*")
+                \item Contenido o nombre de archivo
+                \item Timestamp en UTC
+                \item Metadatos adicionales
+            \end{itemize}
+        \end{itemize}
+    \end{itemize}
+
+    \item Métodos Principales:
+    \begin{itemize}
+        \item append\_message():
+        \begin{itemize}
+            \item Valida parámetros
+            \item Normaliza IDs
+            \item Agrega timestamp actual
+            \item Escribe al historial
+        \end{itemize}
+        \item append\_file():
+        \begin{itemize}
+            \item Similar a mensajes
+            \item Incluye nombre de archivo
+            \item Registra tamaño y tipo
+        \end{itemize}
+        \item get\_conversation():
+        \begin{itemize}
+            \item Filtra por participantes
+            \item Ordena por timestamp
+            \item Excluye mensajes eliminados
+        \end{itemize}
+    \end{itemize}
+
+    \item Optimizaciones:
+    \begin{itemize}
+        \item Cache en memoria:
+        \begin{itemize}
+            \item Mantiene últimas entradas
+            \item Reduce accesos a disco
+            \item Actualiza periódicamente
+        \end{itemize}
+        \item Escritura eficiente:
+        \begin{itemize}
+            \item Append-only por defecto
+            \item Buffer de escritura
+            \item Flush periódico
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+\section{Interfaz de Usuario}
+\subsection{Componentes Principales}
+La interfaz implementa:
+
+\begin{enumerate}
+    \item Panel de autenticación:
+    \begin{itemize}
+        \item Formulario de ingreso de ID
+        \item Validación de longitud máxima
+        \item Manejo de sesión
+    \end{itemize}
+    \item Panel lateral:
+    \begin{itemize}
+        \item Información del usuario
+        \item Estado de conexión TCP
+        \item Lista de peers activos/inactivos
+    \end{itemize}
+    \item Área de chat:
+    \begin{itemize}
+        \item Mensajes globales
+        \item Conversaciones privadas
+        \item Indicadores de transferencia
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Actualización Automática}
+La interfaz se mantiene sincronizada:
+
+\begin{enumerate}
+    \item Refresco cada 3 segundos
+    \item Actualización de estado de peers
+    \item Monitoreo de transferencias TCP
+    \item Indicadores de actividad
+\end{enumerate}
+
+\section{Consideraciones de Seguridad}
+\subsection{Validaciones Implementadas}
+El sistema implementa múltiples capas de seguridad:
+
+\begin{enumerate}
+    \item Sanitización de Entradas:
+    \begin{itemize}
+        \item Nombres de archivo:
+        \begin{itemize}
+            \item Elimina caracteres no seguros
+            \item Limita longitud máxima
+            \item Preserva extensión original
+            \item Maneja caracteres especiales
+        \end{itemize}
+        \item IDs de usuario:
+        \begin{itemize}
+            \item Normaliza a 20 bytes exactos
+            \item Elimina caracteres nulos
+            \item Valida codificación UTF-8
+            \item Previene inyección de bytes
+        \end{itemize}
+        \item Contenido de mensajes:
+        \begin{itemize}
+            \item Valida codificación UTF-8
+            \item Maneja errores de decodificación
+            \item Limita tamaño máximo
+            \item Filtra caracteres de control
+        \end{itemize}
+    \end{itemize}
+
+    \item Protección de Recursos:
+    \begin{itemize}
+        \item Sistema de archivos:
+        \begin{itemize}
+            \item Directorio de descargas aislado
+            \item Nombres de archivo únicos
+            \item Validación de permisos
+            \item Límite de espacio en disco
+        \end{itemize}
+        \item Memoria:
+        \begin{itemize}
+            \item Límites en buffers
+            \item Liberación de recursos
+            \item Manejo de fragmentación
+            \item Protección contra desbordamiento
+        \end{itemize}
+        \item Red:
+        \begin{itemize}
+            \item Timeouts en conexiones
+            \item Límites de reintentos
+            \item Control de concurrencia
+            \item Manejo de desconexiones
+        \end{itemize}
+    \end{itemize}
+
+    \item Validación de Datos:
+    \begin{itemize}
+        \item Headers:
+        \begin{itemize}
+            \item Verifica tamaños exactos
+            \item Valida campos obligatorios
+            \item Comprueba rangos válidos
+            \item Detecta corrupción
+        \end{itemize}
+        \item Cuerpos de mensajes:
+        \begin{itemize}
+            \item Valida longitud declarada
+            \item Verifica integridad
+            \item Detecta truncamiento
+            \item Maneja fragmentación
+        \end{itemize}
+        \item Archivos:
+        \begin{itemize}
+            \item Valida magic numbers
+            \item Detecta tipos MIME
+            \item Verifica checksums
+            \item Limita tamaños
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+\end{document} 

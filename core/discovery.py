@@ -20,6 +20,7 @@ from core.protocol import (
     HEADER_SIZE,
     RESPONSE_SIZE
 )
+from util import get_local_ip_and_broadcast
 
 # Tiempo en segundos después del cual un peer se considera desconectado
 # Este valor es crucial para la limpieza de peers inactivos
@@ -47,22 +48,22 @@ class Discovery:
         self.broadcast_interval = broadcast_interval
         self.peers_store       = peers_store
 
-        # Detección y configuración de IPs locales
-        # Intentamos usar preferentemente IPs en la subred 192.168.1.x
-        hostname  = socket.gethostname()
-        all_addrs = socket.gethostbyname_ex(hostname)[2]
-        
-        # Selección de IP principal para broadcast
-        # Prioridad: 192.168.1.x > otras no-loopback > primera disponible
-        self.local_ip = next(
-            (ip for ip in all_addrs if ip.startswith("192.168.1.")),
-            next((ip for ip in all_addrs if not ip.startswith("127.")), all_addrs[0])
-        )
-        print(f"IP seleccionada para broadcast: {self.local_ip}")
-        
-        # Registro de todas las IPs locales incluyendo loopback
-        # Esto es importante para filtrar auto-descubrimiento
-        self.local_ips = set(all_addrs) | {"127.0.0.1"}
+        # Detección y configuración de IPs locales usando util.py
+        try:
+            self.local_ip, self.broadcast_addr = get_local_ip_and_broadcast()
+            print(f"IP seleccionada para broadcast: {self.local_ip}")
+            print(f"Dirección de broadcast: {self.broadcast_addr}")
+            
+            # Obtener todas las IPs locales para filtrado
+            hostname = socket.gethostname()
+            self.local_ips = set(socket.gethostbyname_ex(hostname)[2]) | {"127.0.0.1"}
+            
+        except RuntimeError as e:
+            print(f"Error detectando red: {e}")
+            # Fallback a configuración básica
+            self.local_ip = "127.0.0.1"
+            self.broadcast_addr = "255.255.255.255"
+            self.local_ips = {"127.0.0.1"}
 
         # Mapa de peers conocidos con su información
         # Estructura: {padded_peer_id: {'ip': str, 'last_seen': datetime}}
@@ -75,7 +76,6 @@ class Discovery:
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         
         # Intento de bind a la IP local seleccionada
-        # Si falla, fallback a 0.0.0.0 (todas las interfaces)
         try:
             self.sock.bind((self.local_ip, UDP_PORT))
             print(f"Socket UDP vinculado a {self.local_ip}")
@@ -142,8 +142,8 @@ class Discovery:
             op_code=0
         )
         try:
-            # Broadcast a toda la red local
-            self.sock.sendto(pkt, ('255.255.255.255', UDP_PORT))
+            # Broadcast usando la dirección detectada
+            self.sock.sendto(pkt, (self.broadcast_addr, UDP_PORT))
             print(f"Broadcast enviado desde {self.local_ip} con ID {self.raw_id}")
         except Exception as e:
             print(f"Error al enviar broadcast: {e}")

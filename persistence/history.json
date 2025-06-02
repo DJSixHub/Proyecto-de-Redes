@@ -1195,5 +1195,208 @@
     "recipient": "Amalia              ",
     "filename": "adadadasdasd.txt",
     "timestamp": "2025-05-29T13:57:41.628469+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "Albert              ",
+    "message": "que bola",
+    "timestamp": "2025-05-29T15:24:33.738305+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "*global*",
+    "message": "que bola",
+    "timestamp": "2025-05-29T15:24:43.762299+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "angelica            ",
+    "message": "probando",
+    "timestamp": "2025-05-29T15:25:01.788895+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "Albert              ",
+    "message": "probando",
+    "timestamp": "2025-05-29T15:25:13.756777+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "angelica            ",
+    "recipient": "Diegop",
+    "message": "holaaa",
+    "timestamp": "2025-05-29T15:25:31.388842+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Albert              ",
+    "recipient": "Diegop",
+    "message": "SDASDASD",
+    "timestamp": "2025-05-29T15:25:49.302864+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "Albert              ",
+    "message": "esto es un mesaje de prueba",
+    "timestamp": "2025-05-29T15:26:04.133614+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "Albert              ",
+    "message": "esto es un mesaje de prueba",
+    "timestamp": "2025-05-29T15:26:08.116557+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Albert              ",
+    "recipient": "Diegop",
+    "message": "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+    "timestamp": "2025-05-29T15:26:11.983501+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Albert              ",
+    "recipient": "Diegop",
+    "message": "HOLA",
+    "timestamp": "2025-05-29T15:26:19.941042+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "Albert              ",
+    "message": "este llego ?",
+    "timestamp": "2025-05-29T15:26:28.220440+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Albert              ",
+    "recipient": "Diegop",
+    "message": "HOLA",
+    "timestamp": "2025-05-29T15:26:40.008779+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Albert              ",
+    "recipient": "Diegop",
+    "message": "qweqwe",
+    "timestamp": "2025-05-29T15:26:42.991570+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "*global*",
+    "message": "me esta costando evaluarlos",
+    "timestamp": "2025-05-29T15:27:00.458043+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "Diegop",
+    "recipient": "angelica            ",
+    "filename": "Proyecto Redes.zip",
+    "timestamp": "2025-05-29T15:27:31.401494+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "Diegop",
+    "filename": "archivo_20250529_152801_24.txt",
+    "timestamp": "2025-05-29T15:28:01.823517+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "Albert              ",
+    "message": "prueba 1",
+    "timestamp": "2025-05-29T15:28:06.820513+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "Diegop",
+    "filename": "archivo_20250529_152843_236.txt",
+    "timestamp": "2025-05-29T15:28:43.691849+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "Diegop",
+    "filename": "archivo_20250529_152902_202.txt",
+    "timestamp": "2025-05-29T15:29:02.837342+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "Diegop",
+    "filename": "archivo_20250529_152947_120.txt",
+    "timestamp": "2025-05-29T15:29:47.746248+00:00"
+  },
+  {
+    "type": "message",
+    "sender": "Diegop",
+    "recipient": "Albert              ",
+    "message": "candeloide",
+    "timestamp": "2025-05-29T15:30:22.598564+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "Diego",
+    "recipient": "Albert              ",
+    "filename": "Proyecto Redes.zip",
+    "timestamp": "2025-05-29T15:34:15.528177+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "Diego",
+    "filename": "archivo_20250529_153442_206.txt",
+    "timestamp": "2025-05-29T15:34:42.384969+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "Diego",
+    "filename": "archivo_20250529_153718_221.dat",
+    "timestamp": "2025-05-29T15:37:18.689718+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "Diego",
+    "filename": "archivo_20250529_154035_71.dat",
+    "timestamp": "2025-05-29T15:40:35.097908+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "Diego",
+    "filename": "archivo_20250529_154044_229.dat",
+    "timestamp": "2025-05-29T15:40:44.888518+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "efefefe",
+    "filename": "archivo_20250529_154725_157.dat",
+    "timestamp": "2025-05-29T15:47:25.071765+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "10.10.10.3",
+    "recipient": "jesucristo",
+    "filename": "archivo_20250529_155257_13.dat",
+    "timestamp": "2025-05-29T15:52:57.605692+00:00"
+  },
+  {
+    "type": "file",
+    "sender": "fafaf",
+    "recipient": "Albert              ",
+    "filename": "Proyecto Redes.zip",
+    "timestamp": "2025-05-29T15:56:28.188713+00:00"
   }
 ]
