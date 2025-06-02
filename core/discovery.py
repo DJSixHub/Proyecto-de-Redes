@@ -1,8 +1,6 @@
-# Este archivo implementa el mecanismo de descubrimiento de peers en la red local.
-# El flujo de trabajo consiste en enviar periódicamente mensajes de Echo-Request por broadcast UDP,
-# procesar las respuestas, y mantener un mapa actualizado de peers activos. El sistema filtra
-# automáticamente las IPs locales para evitar auto-descubrimiento y maneja la persistencia de
-# la información de peers.
+# Mecanismo de descubrimiento de peers mediante broadcasts UDP
+# Envía Echo-Requests, procesa respuestas y mantiene registro de peers
+# Filtra IPs locales para prevenir auto-descubrimiento
 
 import socket
 import time
@@ -22,55 +20,44 @@ from core.protocol import (
 )
 from util import get_local_ip_and_broadcast
 
-# Tiempo en segundos después del cual un peer se considera desconectado
-# Este valor es crucial para la limpieza de peers inactivos
+# Umbral para considerar un peer desconectado (segundos)
 OFFLINE_THRESHOLD = 20.0
 
-# Clase principal para el descubrimiento y seguimiento de peers en la red
-# Esta clase es fundamental porque:
-# 1. Mantiene un registro actualizado de peers activos
-# 2. Maneja la comunicación UDP para descubrimiento
-# 3. Gestiona la persistencia de información de peers
+# Gestiona descubrimiento y seguimiento de peers en la red
+# Registra peers activos y maneja comunicación UDP
 class Discovery:
-    # Inicializa el sistema de descubrimiento
-    # Parámetros:
-    # - user_id: Identificador único del usuario
-    # - broadcast_interval: Frecuencia de envío de Echo-Request
-    # - peers_store: Componente para persistencia de peers
+    # Inicializa sistema de descubrimiento con ID de usuario
     def __init__(self,
                  user_id: bytes,
                  broadcast_interval: float = 1.0,
                  peers_store=None):
-        # Preparación del identificador de usuario
-        # Mantenemos versión raw y padded para diferentes usos
+        # Prepara ID: versión raw y con padding
         self.raw_id   = user_id.rstrip(b'\x00')
         self.user_id  = self.raw_id.ljust(20, b'\x00')
         self.broadcast_interval = broadcast_interval
         self.peers_store       = peers_store
 
-        # Detección y configuración de IPs locales usando util.py
+        # Detección de IP y dirección broadcast
         try:
             self.local_ip, self.broadcast_addr = get_local_ip_and_broadcast()
             print(f"IP seleccionada para broadcast: {self.local_ip}")
             print(f"Dirección de broadcast: {self.broadcast_addr}")
             
-            # Obtener todas las IPs locales para filtrado
+            # IPs locales para filtrado
             hostname = socket.gethostname()
             self.local_ips = set(socket.gethostbyname_ex(hostname)[2]) | {"127.0.0.1"}
             
         except RuntimeError as e:
             print(f"Error detectando red: {e}")
-            # Fallback a configuración básica
+            # Configuración fallback
             self.local_ip = "127.0.0.1"
             self.broadcast_addr = "255.255.255.255"
             self.local_ips = {"127.0.0.1"}
 
-        # Mapa de peers conocidos con su información
-        # Estructura: {padded_peer_id: {'ip': str, 'last_seen': datetime}}
+        # Mapa de peers: {id_con_padding: {'ip': str, 'last_seen': datetime}}
         self.peers = {}
 
-        # Configuración del socket UDP para broadcast
-        # Habilitamos reuso de dirección y capacidad de broadcast
+        # Socket UDP para broadcast
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -88,11 +75,8 @@ class Discovery:
         if self.peers_store:
             threading.Thread(target=self._persist_loop, daemon=True).start()
 
-    # Obtiene información detallada de las interfaces de red
-    # Esta función es importante para:
-    # 1. Detectar todas las interfaces disponibles
-    # 2. Obtener IPs y máscaras de red
-    # 3. Manejar casos especiales de Windows
+    # Obtiene información de interfaces de red disponibles
+    # Extrae IPs y máscaras de red usando ipconfig
     def _get_network_interfaces(self):
         interfaces = []
         
@@ -123,18 +107,14 @@ class Discovery:
             
         return interfaces
 
-    # Bucle principal de broadcast
-    # Envía Echo-Request periódicamente según broadcast_interval
+    # Envía broadcasts periódicos según intervalo configurado
     def _broadcast_loop(self):
         while True:
             self._do_broadcast()
             time.sleep(self.broadcast_interval)
 
-    # Realiza el envío de un Echo-Request por broadcast
-    # Esta función es crítica porque:
-    # 1. Empaqueta el mensaje según el protocolo
-    # 2. Maneja errores de envío
-    # 3. Registra la actividad para debugging
+    # Envía un Echo-Request por broadcast
+    # Empaqueta mensaje y maneja errores
     def _do_broadcast(self):
         pkt = pack_header(
             user_from=self.user_id,
@@ -148,16 +128,12 @@ class Discovery:
         except Exception as e:
             print(f"Error al enviar broadcast: {e}")
 
-    # Fuerza un descubrimiento inmediato
-    # Útil para actualizar rápidamente el estado de la red
+    # Fuerza broadcast inmediato
     def force_discover(self):
         self._do_broadcast()
 
-    # Bucle de persistencia de información de peers
-    # Esta función es importante porque:
-    # 1. Filtra peers locales periódicamente
-    # 2. Actualiza el estado conectado/desconectado
-    # 3. Persiste la información actualizada
+    # Actualiza y persiste información de peers periódicamente
+    # Filtra peers locales y actualiza estados conectado/desconectado
     def _persist_loop(self):
         while True:
             time.sleep(5)
@@ -183,11 +159,8 @@ class Discovery:
             except Exception as e:
                 print(f"Error guardando peers: {e}")
 
-    # Procesa un Echo-Request recibido
-    # Esta función es crítica porque:
-    # 1. Filtra mensajes de IPs locales y propios
-    # 2. Envía Echo-Reply al remitente
-    # 3. Actualiza el mapa de peers
+    # Procesa Echo-Request y responde al peer
+    # Filtra auto-mensajes y actualiza registro de peers
     def handle_echo(self, data: bytes, addr):
         try:
             hdr      = unpack_header(data[:HEADER_SIZE])
@@ -197,12 +170,12 @@ class Discovery:
 
             print(f"Echo recibido de {peer_ip} con ID {raw_id}")
 
-            # Filtrado de auto-descubrimiento
+            # Evita auto-descubrimiento
             if peer_ip in self.local_ips or raw_id == self.raw_id:
                 print(f"Ignorando echo de IP local o self: {peer_ip}")
                 return
 
-            # Envío de Echo-Reply
+            # Envía respuesta
             try:
                 resp = pack_response(0, self.user_id)
                 self.sock.sendto(resp, addr)
@@ -211,7 +184,7 @@ class Discovery:
                 print(f"Error al enviar respuesta echo: {e}")
                 return
 
-            # Limpieza de registros antiguos para la misma IP
+            # Limpia registros antiguos con misma IP
             for uid in list(self.peers):
                 if self.peers[uid]['ip'] == peer_ip and uid != raw_peer:
                     del self.peers[uid]
@@ -225,11 +198,8 @@ class Discovery:
         except Exception as e:
             print(f"Error procesando echo: {e}")
 
-    # Procesa un Echo-Reply recibido
-    # Esta función es similar a handle_echo pero:
-    # 1. Usa formato de respuesta específico
-    # 2. Verifica el estado de la respuesta
-    # 3. Actualiza el mapa de peers
+    # Procesa Echo-Reply y actualiza registro de peers
+    # Verifica validez de la respuesta y filtra auto-respuestas
     def handle_response(self, data: bytes, addr):
         try:
             resp     = unpack_response(data[:RESPONSE_SIZE])
@@ -239,17 +209,17 @@ class Discovery:
 
             print(f"Respuesta recibida de {peer_ip} con ID {resp_id}")
 
-            # Filtrado de respuestas inválidas o propias
+            # Filtra respuestas inválidas o propias
             if resp['status'] != 0 or peer_ip in self.local_ips or resp_id == self.raw_id:
                 print(f"Ignorando respuesta de IP local o self: {peer_ip}")
                 return
 
-            # Limpieza de registros antiguos
+            # Limpia registros antiguos con misma IP
             for uid in list(self.peers):
                 if self.peers[uid]['ip'] == peer_ip and uid != raw_peer:
                     del self.peers[uid]
 
-            # Actualización del mapa de peers
+            # Actualiza registro de peer
             self.peers[raw_peer] = {
                 'ip':        peer_ip,
                 'last_seen': datetime.now(UTC)
@@ -258,11 +228,7 @@ class Discovery:
         except Exception as e:
             print(f"Error procesando respuesta: {e}")
 
-    # Obtiene el mapa filtrado de peers activos
-    # Esta función es importante porque:
-    # 1. Excluye peers con IPs locales
-    # 2. Proporciona información actualizada
-    # 3. Es la interfaz principal para otros módulos
+    # Retorna mapa de peers activos excluyendo IPs locales
     def get_peers(self) -> dict:
         return {
             uid: info
